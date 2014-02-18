@@ -1,4 +1,4 @@
-@ stub ExAcquireFastMutexUnsafe
+@ stdcall -norelay ExAcquireFastMutexUnsafe(ptr)
 @ stub ExAcquireRundownProtection
 @ stub ExAcquireRundownProtectionEx
 @ stub ExInitializeRundownProtection
@@ -8,7 +8,7 @@
 @ stub ExInterlockedPopEntrySList
 @ stub ExInterlockedPushEntrySList
 @ stub ExReInitializeRundownProtection
-@ stub ExReleaseFastMutexUnsafe
+@ stdcall -norelay ExReleaseFastMutexUnsafe(ptr)
 @ stub ExReleaseResourceLite
 @ stub ExReleaseRundownProtection
 @ stub ExReleaseRundownProtectionEx
@@ -356,7 +356,7 @@
 @ stdcall IoDeleteDevice(ptr)
 @ stdcall IoDeleteDriver(ptr)
 @ stdcall IoDeleteSymbolicLink(ptr)
-@ stub IoDetachDevice
+@ stdcall IoDetachDevice(ptr)
 @ stub IoDeviceHandlerObjectSize
 @ stub IoDeviceHandlerObjectType
 @ stub IoDeviceObjectType
@@ -374,7 +374,7 @@
 @ stdcall IoFreeMdl(ptr)
 @ stub IoFreeWorkItem
 @ stub IoGetAttachedDevice
-@ stub IoGetAttachedDeviceReference
+@ stdcall IoGetAttachedDeviceReference(ptr)
 @ stub IoGetBaseFileSystemDeviceObject
 @ stub IoGetBootDiskInformation
 @ stdcall IoGetConfigurationInformation()
@@ -400,7 +400,7 @@
 @ stdcall IoInitializeIrp(ptr long long)
 @ stdcall IoInitializeRemoveLockEx(ptr long long long long)
 @ stdcall IoInitializeTimer(ptr ptr ptr)
-@ stub IoInvalidateDeviceRelations
+@ stdcall IoInvalidateDeviceRelations(ptr long)
 @ stub IoInvalidateDeviceState
 @ stub IoIsFileOriginRemote
 @ stub IoIsOperationSynchronous
@@ -425,12 +425,12 @@
 @ stub IoReadPartitionTableEx
 @ stub IoReadTransferCount
 @ stub IoRegisterBootDriverReinitialization
-@ stub IoRegisterDeviceInterface
+@ stdcall IoRegisterDeviceInterface(ptr ptr ptr ptr)
 @ stdcall IoRegisterDriverReinitialization(ptr ptr ptr)
 @ stdcall IoRegisterFileSystem(ptr)
 @ stub IoRegisterFsRegistrationChange
 @ stub IoRegisterLastChanceShutdownNotification
-@ stub IoRegisterPlugPlayNotification
+@ stdcall IoRegisterPlugPlayNotification(long long ptr ptr ptr ptr ptr)
 @ stdcall IoRegisterShutdownNotification(ptr)
 @ stdcall IoReleaseCancelSpinLock(ptr)
 @ stub IoReleaseRemoveLockAndWaitEx
@@ -446,7 +446,7 @@
 @ stub IoRequestDeviceEject
 @ stub IoReuseIrp
 @ stub IoSetCompletionRoutineEx
-@ stub IoSetDeviceInterfaceState
+@ stdcall IoSetDeviceInterfaceState(ptr long)
 @ stub IoSetDeviceToVerify
 @ stub IoSetFileOrigin
 @ stub IoSetHardErrorOrVerifyDevice
@@ -469,7 +469,7 @@
 @ stub IoThreadToProcess
 @ stdcall IoUnregisterFileSystem(ptr)
 @ stub IoUnregisterFsRegistrationChange
-@ stub IoUnregisterPlugPlayNotification
+@ stdcall IoUnregisterPlugPlayNotification(ptr)
 @ stdcall IoUnregisterShutdownNotification(ptr)
 @ stub IoUpdateShareAccess
 @ stub IoValidateDeviceIoControlAccess
@@ -515,10 +515,10 @@
 @ stub KeBugCheckEx
 @ stub KeCancelTimer
 @ stub KeCapturePersistentThreadState
-@ stub KeClearEvent
+@ stdcall KeClearEvent(ptr)
 @ stub KeConnectInterrupt
 @ stub KeDcacheFlushCount
-@ stub KeDelayExecutionThread
+@ stdcall KeDelayExecutionThread(long long ptr)
 @ stub KeDeregisterBugCheckCallback
 @ stub KeDeregisterBugCheckReasonCallback
 @ stub KeDetachProcess
@@ -689,7 +689,7 @@
 @ stub MmLockPagableImageSection
 @ stub MmLockPagableSectionByHandle
 @ stdcall MmMapIoSpace(long long long long)
-@ stub MmMapLockedPages
+@ stdcall MmMapLockedPages(ptr long)
 @ stdcall MmMapLockedPagesSpecifyCache(ptr long long ptr long long)
 @ stub MmMapLockedPagesWithReservedMapping
 @ stub MmMapMemoryDumpMdl
@@ -719,7 +719,7 @@
 @ stub MmUnlockPagableImageSection
 @ stdcall MmUnlockPages(ptr)
 @ stdcall MmUnmapIoSpace(ptr long)
-@ stub MmUnmapLockedPages
+@ stdcall MmUnmapLockedPages(ptr ptr)
 @ stub MmUnmapReservedMapping
 @ stub MmUnmapVideoDisplay
 @ stub MmUnmapViewInSessionSpace
@@ -798,7 +798,7 @@
 @ stub ObCloseHandle
 @ stub ObCreateObject
 @ stub ObCreateObjectType
-@ stub ObDereferenceObject
+@ stdcall ObDereferenceObject(ptr)
 @ stub ObDereferenceSecurityDescriptor
 @ stub ObFindHandleForObject
 @ stub ObGetObjectSecurity
@@ -811,7 +811,7 @@
 @ stub ObQueryObjectAuditingByHandle
 @ stdcall ObReferenceObjectByHandle(long long ptr long ptr ptr)
 @ stdcall ObReferenceObjectByName(ptr long ptr long ptr long ptr ptr)
-@ stub ObReferenceObjectByPointer
+@ stdcall ObReferenceObjectByPointer(ptr long ptr long)
 @ stub ObReferenceSecurityDescriptor
 @ stub ObReleaseObjectSecurity
 @ stub ObSetHandleAttributes
@@ -1490,3 +1490,9 @@
 # or 'wine_' (for user-visible functions) to avoid namespace conflicts.
 
 @ cdecl wine_ntoskrnl_main_loop(long)
+@ cdecl __wine_add_device(ptr ptr)
+@ cdecl __wine_add_driver_object(ptr wstr)
+@ cdecl __wine_del_driver_object(ptr)
+@ cdecl __wine_get_driver_object(wstr)
+@ cdecl __wine_start_device(ptr)
+@ cdecl __wine_start_service(wstr)

@@ -361,6 +361,7 @@ DECL_HANDLER(set_cursor);
 DECL_HANDLER(update_rawinput_devices);
 DECL_HANDLER(get_suspend_context);
 DECL_HANDLER(set_suspend_context);
+DECL_HANDLER(get_device_name);
 
 #ifdef WANT_REQUEST_HANDLERS
 
@@ -622,6 +623,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_update_rawinput_devices,
     (req_handler)req_get_suspend_context,
     (req_handler)req_set_suspend_context,
+    (req_handler)req_get_device_name,
 };
 
 C_ASSERT( sizeof(affinity_t) == 8 );
@@ -2200,6 +2202,9 @@ C_ASSERT( sizeof(struct update_rawinput_devices_request) == 16 );
 C_ASSERT( sizeof(struct get_suspend_context_request) == 16 );
 C_ASSERT( sizeof(struct get_suspend_context_reply) == 8 );
 C_ASSERT( sizeof(struct set_suspend_context_request) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_device_name_request, handle) == 12 );
+C_ASSERT( sizeof(struct get_device_name_request) == 16 );
+C_ASSERT( sizeof(struct get_device_name_reply) == 8 );
 
 #endif  /* WANT_REQUEST_HANDLERS */
 

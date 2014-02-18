@@ -1,12 +1,13 @@
 MODULE    = mountmgr.sys
-IMPORTS   = uuid advapi32 ntoskrnl.exe
+IMPORTS   = uuid advapi32 ntoskrnl.exe setupapi
 DELAYIMPORTS = user32
 EXTRADLLFLAGS = -Wb,--subsystem,native
-EXTRAINCL = $(DBUS_CFLAGS) $(HAL_CFLAGS)
-EXTRALIBS = $(DISKARBITRATION_LIBS)
+EXTRAINCL = $(DBUS_CFLAGS) $(HAL_CFLAGS) $(USBINCL)
+EXTRALIBS = $(DISKARBITRATION_LIBS) $(USBLIBS) $(LIBUDEV)
 
 C_SRCS = \
 	dbus.c \
 	device.c \
 	diskarb.c \
-	mountmgr.c
+	mountmgr.c \
+	usbhub.c

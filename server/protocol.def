@@ -3510,3 +3510,11 @@ enum coords_relative
 @REQ(set_suspend_context)
     VARARG(context,context);   /* thread context */
 @END
+
+
+/* Get a device name */
+@REQ(get_device_name)
+    obj_handle_t handle;          /* device handle */
+@REPLY
+    VARARG(name,unicode_str);     /* device name */
+@END
