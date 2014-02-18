@@ -38,6 +38,9 @@
 extern void initialize_dbus(void) DECLSPEC_HIDDEN;
 extern void initialize_diskarbitration(void) DECLSPEC_HIDDEN;
 
+extern NTSTATUS WINAPI usbhub_driver_entry( DRIVER_OBJECT *driver,
+                                            UNICODE_STRING *path ) DECLSPEC_HIDDEN;
+
 /* device functions */
 
 enum device_type
@@ -71,3 +74,8 @@ extern struct mount_point *add_volume_mount_point( DEVICE_OBJECT *device, UNICOD
                                                    const GUID *guid ) DECLSPEC_HIDDEN;
 extern void delete_mount_point( struct mount_point *mount ) DECLSPEC_HIDDEN;
 extern void set_mount_point_id( struct mount_point *mount, const void *id, unsigned int id_len ) DECLSPEC_HIDDEN;
+
+/* usb functions */
+
+extern void add_usb_devices(void) DECLSPEC_HIDDEN;
+extern void remove_usb_devices(void) DECLSPEC_HIDDEN;

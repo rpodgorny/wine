@@ -664,6 +664,9 @@ GPHOTO2_PORT_LIBS
 GPHOTO2_PORT_CFLAGS
 GPHOTO2_LIBS
 GPHOTO2_CFLAGS
+USBINCL
+USBLIBS
+LIBUDEV
 SANE_LIBS
 SANE_CFLAGS
 GNUTLS_LIBS
@@ -826,6 +829,8 @@ with_png
 with_pthread
 with_sane
 with_tiff
+with_udev
+with_usb
 with_v4l
 with_xcomposite
 with_xcursor
@@ -1406,6 +1411,9 @@ GPHOTO2_CFLAGS
 GPHOTO2_LIBS
 GPHOTO2_PORT_CFLAGS
 GPHOTO2_PORT_LIBS
+USBLIBS
+USBINCL
+LIBUDEV
 LCMS2_CFLAGS
 LCMS2_LIBS
 FREETYPE_CFLAGS
@@ -2082,6 +2090,8 @@ Optional Packages:
   --without-pthread       do not use the pthread library
   --without-sane          do not use SANE (scanner support)
   --without-tiff          do not use TIFF
+  --without-udev          do not use libudev
+  --without-usb           do not use USB
   --without-v4l           do not use v4l1 (v4l support)
   --without-xcomposite    do not use the Xcomposite extension
   --without-xcursor       do not use the Xcursor extension
@@ -3330,6 +3340,18 @@ fi
 # Check whether --with-tiff was given.
 if test "${with_tiff+set}" = set; then :
   withval=$with_tiff;
+fi
+
+
+# Check whether --with-udev was given.
+if test "${with_udev+set}" = set; then :
+  withval=$with_udev;
+fi
+
+
+# Check whether --with-usb was given.
+if test "${with_usb+set}" = set; then :
+  withval=$with_usb;
 fi
 
 
@@ -11503,6 +11525,189 @@ This is an error since --with-v4l was requested." "$LINENO" 5 ;;
 esac
 fi
 
+LIBUDEV=""
+
+if test "x$with_udev" != "xno"
+then
+    ac_fn_c_check_header_mongrel "$LINENO" "libudev.h" "ac_cv_header_libudev_h" "$ac_includes_default"
+if test "x$ac_cv_header_libudev_h" = xyes; then :
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for udev_new in -ludev" >&5
+$as_echo_n "checking for udev_new in -ludev... " >&6; }
+if ${ac_cv_lib_udev_udev_new+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-ludev  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char udev_new ();
+int
+main ()
+{
+return udev_new ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_lib_udev_udev_new=yes
+else
+  ac_cv_lib_udev_udev_new=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_udev_udev_new" >&5
+$as_echo "$ac_cv_lib_udev_udev_new" >&6; }
+if test "x$ac_cv_lib_udev_udev_new" = xyes; then :
+
+$as_echo "#define HAVE_LIBUDEV 1" >>confdefs.h
+
+             LIBUDEV="-ludev"
+fi
+
+fi
+
+
+fi
+if test "x$ac_cv_lib_udev_udev_new" = "x"; then :
+  case "x$with_udev" in
+  x)   as_fn_append wine_notices "|libudev ${notice_platform}development files not found, no dynamic USB device support." ;;
+  xno) ;;
+  *)   as_fn_error $? "libudev ${notice_platform}development files not found, no dynamic USB device support.
+This is an error since --with-udev was requested." "$LINENO" 5 ;;
+esac
+fi
+
+USBLIBS=""
+
+USBINCL=""
+
+if test "x$with_usb" != "xno"
+then
+    ac_fn_c_check_header_mongrel "$LINENO" "usb.h" "ac_cv_header_usb_h" "$ac_includes_default"
+if test "x$ac_cv_header_usb_h" = xyes; then :
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for usb_init in -lusb" >&5
+$as_echo_n "checking for usb_init in -lusb... " >&6; }
+if ${ac_cv_lib_usb_usb_init+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lusb  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char usb_init ();
+int
+main ()
+{
+return usb_init ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_lib_usb_usb_init=yes
+else
+  ac_cv_lib_usb_usb_init=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_usb_usb_init" >&5
+$as_echo "$ac_cv_lib_usb_usb_init" >&6; }
+if test "x$ac_cv_lib_usb_usb_init" = xyes; then :
+
+$as_echo "#define HAVE_LIBUSB 1" >>confdefs.h
+
+             USBLIBS="-lusb"
+fi
+
+fi
+
+
+    ac_save_CPPFLAGS="$CPPFLAGS"
+    if test "$PKG_CONFIG" != "false"
+    then
+        ac_usb_incl="`$PKG_CONFIG --cflags libusb-1.0`"
+        ac_usb_libs="`$PKG_CONFIG --libs libusb-1.0`"
+        CPPFLAGS="$ac_usb_incl $CPPFLAGS"
+    fi
+    ac_fn_c_check_header_mongrel "$LINENO" "libusb.h" "ac_cv_header_libusb_h" "$ac_includes_default"
+if test "x$ac_cv_header_libusb_h" = xyes; then :
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for libusb_init in -lusb-1.0" >&5
+$as_echo_n "checking for libusb_init in -lusb-1.0... " >&6; }
+if ${ac_cv_lib_usb_1_0_libusb_init+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lusb-1.0  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char libusb_init ();
+int
+main ()
+{
+return libusb_init ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_lib_usb_1_0_libusb_init=yes
+else
+  ac_cv_lib_usb_1_0_libusb_init=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_usb_1_0_libusb_init" >&5
+$as_echo "$ac_cv_lib_usb_1_0_libusb_init" >&6; }
+if test "x$ac_cv_lib_usb_1_0_libusb_init" = xyes; then :
+
+$as_echo "#define HAVE_LIBUSB_1 1" >>confdefs.h
+
+             USBLIBS="$ac_usb_libs"
+             USBINCL="$ac_usb_incl"
+fi
+
+fi
+
+    CPPFLAGS="$ac_save_CPPFLAGS"
+fi
+if test "x$ac_cv_lib_usb_usb_init" != "xyes" -a "x$ac_cv_lib_usb_1_0_libusb_init" != "xyes"; then :
+  case "x$with_usb" in
+  x)   as_fn_append wine_notices "|libusb ${notice_platform}development files not found, USB won't be supported." ;;
+  xno) ;;
+  *)   as_fn_error $? "libusb ${notice_platform}development files not found, USB won't be supported.
+This is an error since --with-usb was requested." "$LINENO" 5 ;;
+esac
+fi
+
+
 if test "x$with_gphoto" != "xno"
 then
     if ${GPHOTO2_CFLAGS:+false} :; then :
@@ -16530,6 +16735,9 @@ GPHOTO2_CFLAGS = $GPHOTO2_CFLAGS
 GPHOTO2_LIBS = $GPHOTO2_LIBS
 GPHOTO2_PORT_CFLAGS = $GPHOTO2_PORT_CFLAGS
 GPHOTO2_PORT_LIBS = $GPHOTO2_PORT_LIBS
+USBINCL = $USBINCL
+USBLIBS = $USBLIBS
+LIBUDEV = $LIBUDEV
 RESOLV_LIBS = $RESOLV_LIBS
 LCMS2_CFLAGS = $LCMS2_CFLAGS
 LCMS2_LIBS = $LCMS2_LIBS

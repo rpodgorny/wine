@@ -5080,6 +5080,18 @@ struct set_suspend_context_reply
     struct reply_header __header;
 };
 
+struct get_device_name_request
+{
+    struct request_header __header;
+	obj_handle_t handle;
+};
+struct get_device_name_reply
+{
+    struct reply_header __header;
+    /* VARARG(name,unicode_str); */
+    //char __pad_12[4];
+};
+
 
 enum request
 {
@@ -5600,6 +5612,7 @@ union generic_request
     struct update_rawinput_devices_request update_rawinput_devices_request;
     struct get_suspend_context_request get_suspend_context_request;
     struct set_suspend_context_request set_suspend_context_request;
+	//struct get_device_name_request get_device_name_request;
 };
 union generic_reply
 {
@@ -5860,6 +5873,7 @@ union generic_reply
     struct update_rawinput_devices_reply update_rawinput_devices_reply;
     struct get_suspend_context_reply get_suspend_context_reply;
     struct set_suspend_context_reply set_suspend_context_reply;
+	struct get_device_name_reply get_device_name_reply;
 };
 
 #define SERVER_PROTOCOL_VERSION 454

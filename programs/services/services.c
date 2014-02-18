@@ -20,6 +20,8 @@
 
 #define WIN32_LEAN_AND_MEAN
 
+#include "config.h"
+
 #include <stdarg.h>
 #include <windows.h>
 #include <winsvc.h>
@@ -261,6 +263,11 @@ DWORD scmdatabase_remove_service(struct scmdatabase *db, struct service_entry *s
 
 static void scmdatabase_autostart_services(struct scmdatabase *db)
 {
+#if defined(HAVE_LIBUSB) || defined(HAVE_LIBUSB_1)
+    static const WCHAR usbhub_started_event[] = {'_','_','w','i','n','e',
+        '_','U','s','b','h','u','b','S','t','a','r','t','e','d',0};
+    static const WCHAR mountmgr[] = {'M','o','u','n','t','M','g','r',0};
+#endif
     struct service_entry **services_list;
     unsigned int i = 0;
     unsigned int size = 32;
@@ -298,12 +305,26 @@ static void scmdatabase_autostart_services(struct scmdatabase *db)
     size = i;
     for (i = 0; i < size; i++)
     {
+#if defined(HAVE_LIBUSB) || defined(HAVE_LIBUSB_1)
+        HANDLE event = NULL;
+#endif
         DWORD err;
         service = services_list[i];
+#if defined(HAVE_LIBUSB) || defined(HAVE_LIBUSB_1)
+        if (!strcmpW(service->name, mountmgr))
+            event = CreateEventW(NULL, TRUE, FALSE, usbhub_started_event);
+#endif
         err = service_start(service, 0, NULL);
         if (err != ERROR_SUCCESS)
             WINE_FIXME("Auto-start service %s failed to start: %d\n",
                        wine_dbgstr_w(service->name), err);
+#if defined(HAVE_LIBUSB) || defined(HAVE_LIBUSB_1)
+        else if (event)
+        {
+            WaitForSingleObject(event, 30000);
+            CloseHandle(event);
+        }
+#endif
         release_service(service);
     }
 

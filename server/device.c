@@ -557,3 +557,26 @@ DECL_HANDLER(get_ioctl_result)
     }
     release_object( device );
 }
+
+
+/* get a device name */
+DECL_HANDLER(get_device_name)
+{
+    struct device *device;
+    const WCHAR *device_name;
+    data_size_t device_name_len;
+
+    if (!(device = (struct device *)get_handle_obj( current->process, req->handle, 0, &device_ops )))
+        return;
+
+    if ((device_name = get_object_name( &device->obj, &device_name_len )))
+    {
+        if (device_name_len <= get_reply_max_size())
+            set_reply_data( device_name, device_name_len );
+        else
+            set_error( STATUS_BUFFER_TOO_SMALL );
+    }
+    else set_error( STATUS_INVALID_DEVICE_REQUEST );
+
+    release_object( device );
+}

@@ -578,6 +578,9 @@ static DBusHandlerResult udisks_filter( DBusConnection *ctx, DBusMessage *msg, v
 static void hal_new_device( LibHalContext *ctx, const char *udi )
 {
     DBusError error;
+#ifndef HAVE_LIBUDEV
+    char *subsys = NULL;
+#endif
     char *parent = NULL;
     char *mount_point = NULL;
     char *device = NULL;
@@ -587,6 +590,12 @@ static void hal_new_device( LibHalContext *ctx, const char *udi )
     enum device_type drive_type;
 
     p_dbus_error_init( &error );
+
+#ifndef HAVE_LIBUDEV
+    if ((subsys = p_libhal_device_get_property_string( ctx, udi, "info.subsystem", NULL )) &&
+        !strcmp( subsys, "usb_device" ))
+        add_usb_devices();
+#endif
 
     if (!(device = p_libhal_device_get_property_string( ctx, udi, "block.device", &error )))
         goto done;
@@ -618,6 +627,9 @@ static void hal_new_device( LibHalContext *ctx, const char *udi )
     else if (guid_ptr) add_volume( udi, device, mount_point, DEVICE_HARDDISK_VOL, guid_ptr );
 
 done:
+#ifndef HAVE_LIBUDEV
+    if (subsys) p_libhal_free_string( subsys );
+#endif
     if (type) p_libhal_free_string( type );
     if (parent) p_libhal_free_string( parent );
     if (device) p_libhal_free_string( device );
@@ -633,6 +645,9 @@ static void hal_removed_device( LibHalContext *ctx, const char *udi )
 
     TRACE( "removed %s\n", wine_dbgstr_a(udi) );
 
+#ifndef HAVE_LIBUDEV
+    remove_usb_devices();
+#endif
     if (!remove_dos_device( -1, udi ))
     {
         p_dbus_error_init( &error );
