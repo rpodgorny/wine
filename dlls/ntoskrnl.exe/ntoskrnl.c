@@ -798,22 +798,6 @@ void WINAPI ExReleaseFastMutexUnsafe( PFAST_MUTEX FastMutex )
 
 
 /***********************************************************************
- *           IoAcquireCancelSpinLock  (NTOSKRNL.EXE.@)
- */
-void WINAPI IoAcquireCancelSpinLock( PKIRQL Irql )
-{
-    FIXME( "stub: %p\n", Irql );
-}
-
-/***********************************************************************
- *           IoReleaseCancelSpinLock  (NTOSKRNL.EXE.@)
- */
-void WINAPI IoReleaseCancelSpinLock( KIRQL Irql )
-{
-    FIXME( "stub: %u\n", Irql );
-}
-
-/***********************************************************************
  *           IoAllocateDriverObjectExtension  (NTOSKRNL.EXE.@)
  */
 NTSTATUS WINAPI IoAllocateDriverObjectExtension( PDRIVER_OBJECT DriverObject,
