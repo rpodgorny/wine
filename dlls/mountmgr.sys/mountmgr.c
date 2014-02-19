@@ -364,7 +364,6 @@ done:
 static NTSTATUS WINAPI mountmgr_ioctl( DEVICE_OBJECT *device, IRP *irp )
 {
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation( irp );
-    NTSTATUS status;
 
     TRACE( "ioctl %x insize %u outsize %u\n",
            irpsp->Parameters.DeviceIoControl.IoControlCode,
@@ -410,9 +409,8 @@ static NTSTATUS WINAPI mountmgr_ioctl( DEVICE_OBJECT *device, IRP *irp )
         irp->IoStatus.u.Status = STATUS_NOT_SUPPORTED;
         break;
     }
-    status = irp->IoStatus.u.Status;
     IoCompleteRequest( irp, IO_NO_INCREMENT );
-    return status;
+    return irp->IoStatus.u.Status;
 }
 
 /* main entry point for the mount point manager driver */
