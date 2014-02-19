@@ -478,7 +478,6 @@ static void save_client_ids( DWORD tid, DWORD pid )
             break;
         }
     }
-    return irp.IoStatus.u.Status;
     LeaveCriticalSection( &cs );
 }
 
