@@ -207,15 +207,6 @@ PUSB_INTERFACE_DESCRIPTOR WINAPI USBD_ParseConfigurationDescriptor(
                                                 InterfaceNumber, AlternateSetting, -1, -1, -1 );
 }
 
-PUSB_INTERFACE_DESCRIPTOR WINAPI USBD_ParseConfigurationDescriptor(
-        PUSB_CONFIGURATION_DESCRIPTOR ConfigurationDescriptor,
-        UCHAR InterfaceNumber, UCHAR AlternateSetting )
-{
-    TRACE( "(%p, %u, %u)\n", ConfigurationDescriptor, InterfaceNumber, AlternateSetting );
-    return USBD_ParseConfigurationDescriptorEx( ConfigurationDescriptor, ConfigurationDescriptor,
-        InterfaceNumber, AlternateSetting, -1, -1, -1 );
-}
-
 PUSB_COMMON_DESCRIPTOR WINAPI USBD_ParseDescriptors(
         PVOID DescriptorBuffer,
         ULONG TotalLength,
