@@ -29,7 +29,9 @@
 #include "winbase.h"
 #include "winternl.h"
 #include "winreg.h"
+#include "winnls.h"
 #include "winsvc.h"
+#include "ddk/wdm.h"
 #include "ddk/ntddk.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -38,21 +40,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(winedevice);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
 
 extern NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event );
-extern BOOL CDECL __wine_add_driver_object( DRIVER_OBJECT *driver, const WCHAR *service );
-extern void CDECL __wine_del_driver_object( const DRIVER_OBJECT *driver );
-extern HANDLE CDECL __wine_make_process_system(void);
 
-#define EVENT_NAME_LEN (30 * sizeof(WCHAR))
-
-static const WCHAR pipe_nameW[] = {'\\','\\','.','\\','p','i','p','e',
-                                   '\\','w','i','n','e','d','e','v','i','c','e',0};
-static const WCHAR winedevice_mutexW[] = {'_','_','w','i','n','e','_',
-                                          'W','i','n','e','d','e','v','i','c','e',0};
-
-/* these variables are used only by "winedevice driver_name" */
 static WCHAR *driver_name;
 static SERVICE_STATUS_HANDLE service_handle;
+static HKEY driver_hkey;
 static HANDLE stop_event;
+static DRIVER_OBJECT driver_obj;
+static DRIVER_EXTENSION driver_extension;
 
 /* find the LDR_MODULE corresponding to the driver module */
 static LDR_MODULE *find_ldr_module( HMODULE module )
@@ -138,9 +132,7 @@ error:
 }
 
 /* call the driver init entry point */
-static NTSTATUS init_driver( HMODULE module, UNICODE_STRING *keyname,
-                             const WCHAR *drv_name, PDRIVER_OBJECT driver_obj,
-                             PDRIVER_EXTENSION driver_extension )
+static NTSTATUS init_driver( HMODULE module, UNICODE_STRING *keyname )
 {
     unsigned int i;
     NTSTATUS status;
@@ -148,38 +140,37 @@ static NTSTATUS init_driver( HMODULE module, UNICODE_STRING *keyname,
 
     if (!nt->OptionalHeader.AddressOfEntryPoint) return STATUS_SUCCESS;
 
-    driver_obj->Size            = sizeof(DRIVER_OBJECT);
-    driver_obj->DriverSection   = find_ldr_module( module );
-    driver_obj->DriverInit      = (PDRIVER_INITIALIZE)((char *)module + nt->OptionalHeader.AddressOfEntryPoint);
-    driver_obj->DriverExtension = driver_extension;
+    driver_obj.Size            = sizeof(driver_obj);
+    driver_obj.DriverSection   = find_ldr_module( module );
+    driver_obj.DriverInit      = (PDRIVER_INITIALIZE)((char *)module + nt->OptionalHeader.AddressOfEntryPoint);
+    driver_obj.DriverExtension = &driver_extension;
 
-    driver_extension->DriverObject   = driver_obj;
-    driver_extension->ServiceKeyName = *keyname;
+    driver_extension.DriverObject   = &driver_obj;
+    driver_extension.ServiceKeyName = *keyname;
 
     if (WINE_TRACE_ON(relay))
         WINE_DPRINTF( "%04x:Call driver init %p (obj=%p,str=%s)\n", GetCurrentThreadId(),
-                      driver_obj->DriverInit, driver_obj, wine_dbgstr_w(keyname->Buffer) );
+                      driver_obj.DriverInit, &driver_obj, wine_dbgstr_w(keyname->Buffer) );
 
-    status = driver_obj->DriverInit( driver_obj, keyname );
+    status = driver_obj.DriverInit( &driver_obj, keyname );
 
     if (WINE_TRACE_ON(relay))
         WINE_DPRINTF( "%04x:Ret  driver init %p (obj=%p,str=%s) retval=%08x\n", GetCurrentThreadId(),
-                      driver_obj->DriverInit, driver_obj, wine_dbgstr_w(keyname->Buffer), status );
+                      driver_obj.DriverInit, &driver_obj, wine_dbgstr_w(keyname->Buffer), status );
 
-    WINE_TRACE( "init done for %s obj %p\n", wine_dbgstr_w(drv_name), driver_obj );
-    WINE_TRACE( "- DriverInit = %p\n", driver_obj->DriverInit );
-    WINE_TRACE( "- DriverStartIo = %p\n", driver_obj->DriverStartIo );
-    WINE_TRACE( "- DriverUnload = %p\n", driver_obj->DriverUnload );
-    WINE_TRACE( "- AddDevice = %p\n", driver_extension->AddDevice );
+    WINE_TRACE( "init done for %s obj %p\n", wine_dbgstr_w(driver_name), &driver_obj );
+    WINE_TRACE( "- DriverInit = %p\n", driver_obj.DriverInit );
+    WINE_TRACE( "- DriverStartIo = %p\n", driver_obj.DriverStartIo );
+    WINE_TRACE( "- DriverUnload = %p\n", driver_obj.DriverUnload );
+    WINE_TRACE( "- AddDevice = %p\n", driver_obj.AddDevice );
     for (i = 0; i <= IRP_MJ_MAXIMUM_FUNCTION; i++)
-        WINE_TRACE( "- MajorFunction[%d] = %p\n", i, driver_obj->MajorFunction[i] );
+        WINE_TRACE( "- MajorFunction[%d] = %p\n", i, driver_obj.MajorFunction[i] );
 
     return status;
 }
 
 /* load the .sys module for a device driver */
-static HMODULE load_driver( const WCHAR *drv_name, PDRIVER_OBJECT driver_obj,
-                            PDRIVER_EXTENSION driver_extension )
+static BOOL load_driver(void)
 {
     static const WCHAR driversW[] = {'\\','d','r','i','v','e','r','s','\\',0};
     static const WCHAR systemrootW[] = {'\\','S','y','s','t','e','m','R','o','o','t','\\',0};
@@ -192,22 +183,20 @@ static HMODULE load_driver( const WCHAR *drv_name, PDRIVER_OBJECT driver_obj,
                                       '\\','C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t',
                                       '\\','S','e','r','v','i','c','e','s','\\',0};
 
-    HKEY driver_hkey;
     UNICODE_STRING keypath;
     HMODULE module;
     LPWSTR path = NULL, str;
     DWORD type, size;
-    NTSTATUS status;
 
-    str = HeapAlloc( GetProcessHeap(), 0, sizeof(servicesW) + strlenW(drv_name)*sizeof(WCHAR) );
+    str = HeapAlloc( GetProcessHeap(), 0, sizeof(servicesW) + strlenW(driver_name)*sizeof(WCHAR) );
     lstrcpyW( str, servicesW );
-    lstrcatW( str, drv_name );
+    lstrcatW( str, driver_name );
 
     if (RegOpenKeyW( HKEY_LOCAL_MACHINE, str + 18 /* skip \registry\machine */, &driver_hkey ))
     {
         WINE_ERR( "cannot open key %s, err=%u\n", wine_dbgstr_w(str), GetLastError() );
         HeapFree( GetProcessHeap(), 0, str);
-        return NULL;
+        return FALSE;
     }
     RtlInitUnicodeString( &keypath, str );
 
@@ -223,7 +212,7 @@ static HMODULE load_driver( const WCHAR *drv_name, PDRIVER_OBJECT driver_obj,
             ExpandEnvironmentStringsW(str,path,size);
         }
         HeapFree( GetProcessHeap(), 0, str );
-        if (!path) return NULL;
+        if (!path) return FALSE;
 
         if (!strncmpiW( path, systemrootW, 12 ))
         {
@@ -249,11 +238,11 @@ static HMODULE load_driver( const WCHAR *drv_name, PDRIVER_OBJECT driver_obj,
         WCHAR buffer[MAX_PATH];
         GetSystemDirectoryW(buffer, MAX_PATH);
         path = HeapAlloc(GetProcessHeap(),0,
-          (strlenW(buffer) + strlenW(driversW) + strlenW(drv_name) + strlenW(postfixW) + 1)
+          (strlenW(buffer) + strlenW(driversW) + strlenW(driver_name) + strlenW(postfixW) + 1)
           *sizeof(WCHAR));
         lstrcpyW(path, buffer);
         lstrcatW(path, driversW);
-        lstrcatW(path, drv_name);
+        lstrcatW(path, driver_name);
         lstrcatW(path, postfixW);
         str = path;
     }
@@ -262,32 +251,10 @@ static HMODULE load_driver( const WCHAR *drv_name, PDRIVER_OBJECT driver_obj,
 
     module = load_driver_module( str );
     HeapFree( GetProcessHeap(), 0, path );
-    if (!module) return NULL;
+    if (!module) return FALSE;
 
-    status = init_driver( module, &keypath, drv_name, driver_obj, driver_extension );
-    if (status != STATUS_SUCCESS)
-    {
-        FreeLibrary( module );
-        return NULL;
-    }
-    return module;
-}
-
-static void unload_driver( HMODULE module, DRIVER_OBJECT *driver_obj )
-{
-    if (driver_obj->DriverUnload)
-    {
-        if (WINE_TRACE_ON(relay))
-            WINE_DPRINTF( "%04x:Call driver unload %p (obj=%p)\n",
-                          GetCurrentThreadId(), driver_obj->DriverUnload, driver_obj );
-
-        driver_obj->DriverUnload( driver_obj );
-
-        if (WINE_TRACE_ON(relay))
-            WINE_DPRINTF( "%04x:Ret  driver unload %p (obj=%p)\n",
-                          GetCurrentThreadId(), driver_obj->DriverUnload, driver_obj );
-    }
-    FreeLibrary( module );
+    init_driver( module, &keypath );
+    return TRUE;
 }
 
 static DWORD WINAPI service_handler( DWORD ctrl, DWORD event_type, LPVOID event_data, LPVOID context )
@@ -312,144 +279,24 @@ static DWORD WINAPI service_handler( DWORD ctrl, DWORD event_type, LPVOID event_
         SetEvent( stop_event );
         return NO_ERROR;
     default:
-        WINE_FIXME( "got service ctrl %x for %s\n", ctrl,
-                    wine_dbgstr_w(driver_name) );
+        WINE_FIXME( "got service ctrl %x for %s\n", ctrl, wine_dbgstr_w(driver_name) );
         status.dwCurrentState = SERVICE_RUNNING;
         SetServiceStatus( service_handle, &status );
         return NO_ERROR;
     }
 }
 
-static int loading_request( WCHAR *event_name )
-{
-    static WCHAR winedeviceW[] = {'\\','w','i','n','e','d','e','v','i','c','e','.','e','x','e',0};
-
-    WCHAR *driver_process_cmd;
-    PROCESS_INFORMATION pi;
-    STARTUPINFOW si;
-    HANDLE pipe;
-    DWORD count, len;
-    BOOL ret, loaded;
-
-    /* create winedevice.exe process which will load drivers */
-
-    len = GetSystemDirectoryW( NULL, 0 );
-    driver_process_cmd = HeapAlloc( GetProcessHeap(), 0, sizeof(winedeviceW)
-            + sizeof(WCHAR) * len );
-    if (!driver_process_cmd) return 1;
-    GetSystemDirectoryW( driver_process_cmd, len );
-    strcpyW( driver_process_cmd + len - 1, winedeviceW );
-
-    RtlZeroMemory( &si, sizeof(STARTUPINFOW) );
-    si.cb = sizeof(STARTUPINFOW);
-    ret = CreateProcessW( NULL, driver_process_cmd, NULL, NULL, FALSE, 0,
-            NULL, NULL, &si, &pi );
-    HeapFree( GetProcessHeap(), 0, driver_process_cmd );
-    if (!ret) return 1;
-    CloseHandle( pi.hThread );
-    CloseHandle( pi.hProcess );
-
-    /* send driver and event names and receive loading result */
-
-    do {
-        WaitNamedPipeW( pipe_nameW, NMPWAIT_WAIT_FOREVER );
-        pipe = CreateFileW( pipe_nameW, GENERIC_READ | GENERIC_WRITE, 0, NULL,
-                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
-    } while (pipe == INVALID_HANDLE_VALUE);
-    len = (strlenW(driver_name) + 1) * sizeof(WCHAR);
-    ret = WriteFile( pipe, &len, sizeof(DWORD), &count, NULL );
-    if (!ret || count != sizeof(DWORD)) goto fail;
-    ret = WriteFile( pipe, driver_name, len, &count, NULL );
-    if (!ret || count != len) goto fail;
-    ret = WriteFile( pipe, event_name, EVENT_NAME_LEN, &count, NULL );
-    if (!ret || count != EVENT_NAME_LEN) goto fail;
-    ret = ReadFile( pipe, &loaded, sizeof(BOOL), &count, NULL );
-    if (!ret || count != sizeof(BOOL)) goto fail;
-    if (loaded)
-    {
-        CloseHandle( pipe );
-        return 0;
-    }
-fail:
-    CloseHandle( pipe );
-    return 1;
-}
-
-static HMODULE handle_loading_request( HANDLE pipe, DRIVER_OBJECT *driver_obj,
-                                       DRIVER_EXTENSION *driver_extension,
-                                       WCHAR **drv_name, WCHAR **event_name )
-{
-    HMODULE module = NULL;
-    BOOL ret, loaded = FALSE;
-    DWORD count, len;
-
-    *drv_name = NULL;
-    *event_name = NULL;
-    ret = ReadFile( pipe, &len, sizeof(DWORD), &count, NULL );
-    if (!ret || count != sizeof(DWORD)) goto end;
-    *drv_name = HeapAlloc( GetProcessHeap(), 0, len );
-    if (!*drv_name) goto end;
-    ret = ReadFile( pipe, *drv_name, len, &count, NULL );
-    if (!ret || count != len) goto end;
-    *event_name = HeapAlloc( GetProcessHeap(), 0, EVENT_NAME_LEN );
-    if (!*event_name) goto end;
-    ret = ReadFile( pipe, *event_name, EVENT_NAME_LEN, &count, NULL );
-    if (!ret || count != EVENT_NAME_LEN) goto end;
-    module = load_driver( *drv_name, driver_obj, driver_extension );
-    if (module) loaded = TRUE;
-    ret = WriteFile( pipe, &loaded, sizeof(BOOL), &count, NULL );
-    if (module && (!ret || count != sizeof(BOOL)))
-    {
-        unload_driver( module, driver_obj );
-        module = NULL;
-    }
-end:
-    DisconnectNamedPipe( pipe );
-    CloseHandle( pipe );
-    if (!module)
-    {
-        if (*drv_name) HeapFree( GetProcessHeap(), 0, *drv_name );
-        if (*event_name) HeapFree( GetProcessHeap(), 0, *drv_name );
-    }
-    return module;
-}
-
-static HANDLE create_named_event( WCHAR **event_name )
-{
-    static const WCHAR event_nameW[] = {'_','_','w','i','n','e','_',
-                                        'W','i','n','e','d','e','v','i','c','e','_','%','u',0};
-
-    HANDLE event;
-    unsigned int k = 0;
-
-    *event_name = HeapAlloc( GetProcessHeap(), 0, EVENT_NAME_LEN );
-    if (!*event_name) return NULL;
-    for (;;)
-    {
-        snprintfW( *event_name, EVENT_NAME_LEN / sizeof(WCHAR), event_nameW, k++ );
-        event = CreateEventW( NULL, TRUE, FALSE, *event_name );
-        if (event && GetLastError() != ERROR_ALREADY_EXISTS)
-            return event;
-        CloseHandle( event );
-    }
-}
-
 static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
 {
     SERVICE_STATUS status;
-    WCHAR *event_name;
 
     WINE_TRACE( "starting service %s\n", wine_dbgstr_w(driver_name) );
 
-    stop_event = create_named_event( &event_name );
-    if (!stop_event)
-        return;
+    stop_event = CreateEventW( NULL, TRUE, FALSE, NULL );
+
     service_handle = RegisterServiceCtrlHandlerExW( driver_name, service_handler, NULL );
     if (!service_handle)
-    {
-        HeapFree( GetProcessHeap(), 0, event_name );
         return;
-    }
 
     status.dwServiceType             = SERVICE_WIN32;
     status.dwCurrentState            = SERVICE_START_PENDING;
@@ -460,100 +307,31 @@ static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
     status.dwWaitHint                = 10000;
     SetServiceStatus( service_handle, &status );
 
-    if (!loading_request( event_name ))
+    if (load_driver())
     {
         status.dwCurrentState     = SERVICE_RUNNING;
         status.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
         SetServiceStatus( service_handle, &status );
 
-        WaitForSingleObject( stop_event, INFINITE );
+        wine_ntoskrnl_main_loop( stop_event );
     }
     else WINE_ERR( "driver %s failed to load\n", wine_dbgstr_w(driver_name) );
 
-    HeapFree( GetProcessHeap(), 0, event_name );
     status.dwCurrentState     = SERVICE_STOPPED;
     status.dwControlsAccepted = 0;
     SetServiceStatus( service_handle, &status );
     WINE_TRACE( "service %s stopped\n", wine_dbgstr_w(driver_name) );
 }
 
-static DWORD CALLBACK driver_thread( HANDLE pipe )
-{
-    DRIVER_OBJECT driver_obj;
-    DRIVER_EXTENSION driver_extension;
-    WCHAR *drv_name, *event_name;
-    HMODULE module;
-
-    RtlZeroMemory( &driver_obj, sizeof(driver_obj) );
-    RtlZeroMemory( &driver_extension, sizeof(driver_extension) );
-    module = handle_loading_request( pipe, &driver_obj, &driver_extension,
-            &drv_name, &event_name );
-    if (module)
-    {
-        HANDLE loop_event;
-
-        loop_event = CreateEventW( NULL, TRUE, FALSE, event_name );
-        if (__wine_add_driver_object( &driver_obj, drv_name ))
-        {
-            wine_ntoskrnl_main_loop( loop_event );
-            __wine_del_driver_object( &driver_obj );
-        }
-        /* stop service if wine_ntoskrnl_main_loop exits */
-        SetEvent( loop_event );
-        CloseHandle( loop_event );
-        unload_driver( module, &driver_obj );
-        HeapFree( GetProcessHeap(), 0, drv_name );
-        HeapFree( GetProcessHeap(), 0, event_name );
-    }
-    return 0;
-}
-
-static int driver_process(void)
-{
-    HANDLE pipe, winedevice_mutex, thread;
-
-    __wine_make_process_system();
-    winedevice_mutex = CreateMutexW( NULL, TRUE, winedevice_mutexW );
-    if (GetLastError() == ERROR_ALREADY_EXISTS)
-    {
-        CloseHandle( winedevice_mutex );
-        return 1;
-    }
-    for (;;)
-    {
-        pipe = CreateNamedPipeW( pipe_nameW, PIPE_ACCESS_DUPLEX,
-                PIPE_TYPE_BYTE | PIPE_WAIT, PIPE_UNLIMITED_INSTANCES,
-                256, 256, 10000, NULL );
-        if (pipe == INVALID_HANDLE_VALUE)
-        {
-            WINE_ERR( "failed to create pipe\n" );
-            continue;
-        }
-        if (!ConnectNamedPipe( pipe, NULL ) &&
-            GetLastError() != ERROR_PIPE_CONNECTED)
-        {
-            CloseHandle( pipe );
-            continue;
-        }
-
-        thread = CreateThread( NULL, 0, driver_thread, pipe, 0, NULL );
-        if (!thread)
-        {
-            WINE_ERR( "failed to create thread\n" );
-            DisconnectNamedPipe( pipe );
-            CloseHandle( pipe );
-            continue;
-        }
-        CloseHandle( thread );
-    }
-}
-
 int wmain( int argc, WCHAR *argv[] )
 {
     SERVICE_TABLE_ENTRYW service_table[2];
 
-    if (!argv[1]) return driver_process();
-    driver_name = argv[1];
+    if (!(driver_name = argv[1]))
+    {
+        WINE_ERR( "missing device name, winedevice isn't supposed to be run manually\n" );
+        return 1;
+    }
 
     service_table[0].lpServiceName = argv[1];
     service_table[0].lpServiceProc = ServiceMain;
