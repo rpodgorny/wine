@@ -2702,16 +2702,6 @@ void WINAPI MmProbeAndLockPages(PMDLX MemoryDescriptorList, KPROCESSOR_MODE Acce
 
 
 /***********************************************************************
- *           MmProbeAndLockPages   (NTOSKRNL.EXE.@)
- */
-void WINAPI MmProbeAndLockPages(PMDL MemoryDescriptorList,
-                                KPROCESSOR_MODE AccessMode,
-                                LOCK_OPERATION Operation)
-{
-    FIXME("stub: %p %d %u\n", MemoryDescriptorList, AccessMode, Operation);
-}
-
-/***********************************************************************
  *           MmResetDriverPaging   (NTOSKRNL.EXE.@)
  */
 void WINAPI MmResetDriverPaging(PVOID AddrInSection)
@@ -2816,14 +2806,6 @@ void WINAPI ObfDereferenceObject( VOID *obj )
     ObDereferenceObject( obj );
 }
 
-
-/***********************************************************************
- *           MmUnlockPages   (NTOSKRNL.EXE.@)
- */
-void WINAPI MmUnlockPages(PMDL MemoryDescriptorList)
-{
-    FIXME("stub: %p\n", MemoryDescriptorList);
-}
 
 /***********************************************************************
  *           PsCreateSystemThread   (NTOSKRNL.EXE.@)
