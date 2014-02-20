@@ -86,6 +86,13 @@ struct IrpInstance
     IRP *irp;
 };
 
+/* tid of the thread running client request */
+static DWORD request_thread;
+
+/* pid/tid of the client thread */
+static DWORD client_tid;
+static DWORD client_pid;
+
 static struct list DriverObjExtensions = LIST_INIT(DriverObjExtensions);
 
 struct DriverObjExtension
@@ -565,8 +572,8 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
     DEVICE_OBJECT *device = NULL;
     ULONG in_size = 4096, out_size = 0;
     HANDLE handles[2];
-    DWORD client_tid = 0;
-    DWORD client_pid = 0;
+
+    request_thread = GetCurrentThreadId();
 
     if (!(in_buff = HeapAlloc( GetProcessHeap(), 0, in_size )))
     {
@@ -976,10 +983,10 @@ PMDL WINAPI IoAllocateMdl( PVOID VirtualAddress, ULONG Length, BOOLEAN Secondary
 }
 
 
- /***********************************************************************
+/***********************************************************************
  *           IoFreeMdl  (NTOSKRNL.EXE.@)
  */
-void WINAPI IoFreeMdl( MDL *mdl )
+VOID WINAPI IoFreeMdl(PMDL mdl)
 {
     HANDLE process;
     SIZE_T bytes_written;
@@ -1067,6 +1074,15 @@ PIRP WINAPI IoBuildDeviceIoControlRequest( ULONG IoControlCode,
     irp = IoAllocateIrp( DeviceObject->StackSize, FALSE );
     if (irp == NULL)
         return NULL;
+
+    instance = HeapAlloc( GetProcessHeap(), 0, sizeof(struct IrpInstance) );
+    if (instance == NULL)
+    {
+        IoFreeIrp( irp );
+        return NULL;
+    }
+    instance->irp = irp;
+    list_add_tail( &Irps, &instance->entry );
 
     irpsp = IoGetNextIrpStackLocation( irp );
     irpsp->MajorFunction = InternalDeviceIoControl ?
@@ -1949,7 +1965,7 @@ VOID WINAPI IoCompleteRequest( IRP *irp, UCHAR priority_boost )
     status = irp->IoStatus.u.Status;
     while (irp->CurrentLocation <= irp->StackCount)
     {
-        irpsp = IoGetCurrentIrpStackLocation( irp );
+        irpsp = irp->Tail.Overlay.s.u2.CurrentStackLocation;
         routine = irpsp->CompletionRoutine;
         call_flag = 0;
         /* FIXME: add SL_INVOKE_ON_CANCEL support */
@@ -1965,14 +1981,14 @@ VOID WINAPI IoCompleteRequest( IRP *irp, UCHAR priority_boost )
         if (call_flag)
         {
             TRACE( "calling %p( %p, %p, %p )\n", routine,
-                    (irpsp + 1)->DeviceObject, irp, irpsp->Context );
-            stat = routine( (irpsp + 1)->DeviceObject, irp, irpsp->Context );
+                    irpsp->DeviceObject, irp, irpsp->Context );
+            stat = routine( irpsp->DeviceObject, irp, irpsp->Context );
             TRACE( "CompletionRoutine returned %x\n", stat );
             if (STATUS_MORE_PROCESSING_REQUIRED == stat)
                 return;
         }
     }
-    if (iosb && status >= 0)
+    if (iosb && STATUS_SUCCESS == status)
     {
         iosb->u.Status = irp->IoStatus.u.Status;
         iosb->Information = irp->IoStatus.Information;
@@ -2826,9 +2842,7 @@ NTSTATUS WINAPI PsCreateSystemThread(PHANDLE ThreadHandle, ULONG DesiredAccess,
  */
 HANDLE WINAPI PsGetCurrentProcessId(void)
 {
-    DWORD client_pid = get_client_pid();
-
-    if (client_pid)
+    if (GetCurrentThreadId() == request_thread)
         return UlongToHandle(client_pid);
     return UlongToHandle(GetCurrentProcessId());
 }
@@ -2839,9 +2853,7 @@ HANDLE WINAPI PsGetCurrentProcessId(void)
  */
 HANDLE WINAPI PsGetCurrentThreadId(void)
 {
-    DWORD client_tid = get_client_tid();
-
-    if (client_tid)
+    if (GetCurrentThreadId() == request_thread)
         return UlongToHandle(client_tid);
     return UlongToHandle(GetCurrentThreadId());
 }
@@ -2978,10 +2990,10 @@ VOID WINAPI READ_REGISTER_BUFFER_UCHAR(PUCHAR Register, PUCHAR Buffer, ULONG Cou
 /*****************************************************
  *           PoSetPowerState   (NTOSKRNL.EXE.@)
  */
-UINT WINAPI PoSetPowerState(PDEVICE_OBJECT DeviceObject, POWER_STATE_TYPE Type, POWER_STATE State)
+POWER_STATE WINAPI PoSetPowerState(PDEVICE_OBJECT DeviceObject, POWER_STATE_TYPE Type, POWER_STATE State)
 {
     FIXME("(%p %u %u) stub\n", DeviceObject, Type, State.DeviceState);
-    return State.DeviceState;
+    return State;
 }
 
 /*****************************************************

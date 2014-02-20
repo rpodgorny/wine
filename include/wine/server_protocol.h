@@ -5351,7 +5351,7 @@ enum request
     REQ_update_rawinput_devices,
     REQ_get_suspend_context,
     REQ_set_suspend_context,
-	REQ_get_device_name,
+    REQ_get_device_name,
     REQ_NB_REQUESTS
 };
 
