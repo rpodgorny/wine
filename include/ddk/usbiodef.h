@@ -16,10 +16,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef   __USBIODEF_H__
-#define   __USBIODEF_H__
+#ifndef __DDK_USBIODEF_H__
+#define __DDK_USBIODEF_H__
 
-#define USB_SUBMIT_URB           0
+#define USB_SUBMIT_URB 0
 
 #define USB_GET_NODE_INFORMATION               258
 #define USB_GET_NODE_CONNECTION_INFORMATION    259
@@ -32,4 +32,4 @@ DEFINE_GUID( GUID_DEVINTERFACE_USB_HUB,
 
 #define FILE_DEVICE_USB FILE_DEVICE_UNKNOWN
 
-#endif  /* __USBIODEF_H__ */
+#endif /* __DDK_USBIODEF_H__ */

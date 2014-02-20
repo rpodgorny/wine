@@ -16,11 +16,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __USBIOCTL_H__
-#define __USBIOCTL_H__
+#ifndef __DDK_USBIOCTL_H__
+#define __DDK_USBIOCTL_H__
 
-#include <ddk/usb100.h>
-#include <ddk/usbiodef.h>
+#define IOCTL_INTERNAL_USB_SUBMIT_URB  \
+  CTL_CODE(FILE_DEVICE_USB, USB_SUBMIT_URB, METHOD_NEITHER, FILE_ANY_ACCESS)
 
 #define IOCTL_USB_GET_NODE_INFORMATION               CTL_CODE(FILE_DEVICE_USB, USB_GET_NODE_INFORMATION, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_USB_GET_NODE_CONNECTION_INFORMATION    CTL_CODE(FILE_DEVICE_USB, USB_GET_NODE_CONNECTION_INFORMATION, METHOD_BUFFERED, FILE_ANY_ACCESS)
@@ -28,6 +28,8 @@
 
 #define IOCTL_USB_GET_ROOT_HUB_NAME CTL_CODE(FILE_DEVICE_USB, HCD_GET_ROOT_HUB_NAME, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
+#include <ddk/usb100.h>
+#include <ddk/usbiodef.h>
 #include <pshpack1.h>
 
 typedef enum _USB_HUB_NODE {
@@ -94,4 +96,4 @@ typedef struct _USB_HCD_DRIVERKEY_NAME {
 
 #include <poppack.h>
 
-#endif  /* __USBIOCTL_H__ */
+#endif /* __DDK_USBIOCTL_H__ */
