@@ -558,7 +558,7 @@
 @ stub KeInsertByKeyDeviceQueue
 @ stub KeInsertDeviceQueue
 @ stub KeInsertHeadQueue
-@ stub KeInsertQueue
+@ stdcall KeInsertQueue(ptr ptr)
 @ stub KeInsertQueueApc
 @ stub KeInsertQueueDpc
 @ stub KeIsAttachedProcess
@@ -687,7 +687,7 @@
 @ stub MmIsVerifierEnabled
 @ stub MmLockPagableDataSection
 @ stub MmLockPagableImageSection
-@ stub MmLockPagableSectionByHandle
+@ stdcall MmLockPagableSectionByHandle(ptr)
 @ stdcall MmMapIoSpace(long long long long)
 @ stdcall MmMapLockedPages(ptr long)
 @ stdcall MmMapLockedPagesSpecifyCache(ptr long long ptr long long)
@@ -716,7 +716,7 @@
 @ stub MmSizeOfMdl
 @ stub MmSystemRangeStart
 @ stub MmTrimAllSystemPagableMemory
-@ stub MmUnlockPagableImageSection
+@ stdcall MmUnlockPagableImageSection(ptr)
 @ stdcall MmUnlockPages(ptr)
 @ stdcall MmUnmapIoSpace(ptr long)
 @ stdcall MmUnmapLockedPages(ptr ptr)

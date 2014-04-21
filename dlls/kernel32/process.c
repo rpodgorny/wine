@@ -2768,7 +2768,7 @@ DWORD WINAPI TlsAlloc( void )
     PEB * const peb = NtCurrentTeb()->Peb;
 
     RtlAcquirePebLock();
-    index = RtlFindClearBitsAndSet( peb->TlsBitmap, 1, 0 );
+    index = RtlFindClearBitsAndSet( peb->TlsBitmap, 1, 1 );
     if (index != ~0U) NtCurrentTeb()->TlsSlots[index] = 0; /* clear the value */
     else
     {
@@ -3911,9 +3911,9 @@ HRESULT WINAPI RegisterApplicationRecoveryCallback(APPLICATION_RECOVERY_CALLBACK
  */
 BOOL WINAPI GetNumaHighestNodeNumber(PULONG highestnode)
 {
-    FIXME("(%p): stub\n", highestnode);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    *highestnode = 0;
+    FIXME("(%p): semi-stub\n", highestnode);
+    return TRUE;
 }
 
 /**********************************************************************

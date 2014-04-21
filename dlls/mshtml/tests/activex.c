@@ -977,7 +977,7 @@ static HRESULT WINAPI ViewObjectEx_GetViewStatus(IViewObjectEx *iface, DWORD *pd
 static HRESULT WINAPI ViewObjectEx_QueryHitPoint(IViewObjectEx *iface, DWORD dwAspect, LPCRECT pRectBounds, POINT ptlLoc,
         LONG lCloseHint, DWORD *pHitResult)
 {
-    ok(0, "unexpected call\n");
+    trace("QueryHitPoint call ignored\n");
     return E_NOTIMPL;
 }
 
@@ -2690,12 +2690,6 @@ static BOOL check_ie(void)
 {
     IHTMLDocument5 *doc;
     HRESULT hres;
-
-    static const WCHAR xW[] = {'x',0};
-    static const WCHAR yW[] = {'y',0};
-
-    if(!lstrcmpW(xW, yW))
-        return FALSE;
 
     hres = CoCreateInstance(&CLSID_HTMLDocument, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
             &IID_IHTMLDocument5, (void**)&doc);

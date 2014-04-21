@@ -798,6 +798,18 @@ int WINAPI GetCalendarInfoW(LCID Locale, CALID Calendar, CALTYPE CalType,
 }
 
 /*********************************************************************
+ *	GetCalendarInfoEx				(KERNEL32.@)
+ */
+int WINAPI GetCalendarInfoEx(LPCWSTR locale, CALID calendar, LPCWSTR lpReserved, CALTYPE caltype,
+    LPWSTR data, int len, DWORD *value)
+{
+    LCID lcid = LocaleNameToLCID(locale, 0);
+    FIXME("(%s, %d, %p, 0x%08x, %p, %d, %p): semi-stub\n", debugstr_w(locale), calendar, lpReserved, caltype,
+        data, len, value);
+    return GetCalendarInfoW(lcid, calendar, caltype, data, len, value);
+}
+
+/*********************************************************************
  *	SetCalendarInfoA				(KERNEL32.@)
  *
  */
@@ -1090,4 +1102,15 @@ DWORD WINAPI GetDynamicTimeZoneInformation(PDYNAMIC_TIME_ZONE_INFORMATION info)
     FIXME("(%p) stub!\n", info);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return TIME_ZONE_ID_INVALID;
+}
+
+/***********************************************************************
+ *           QueryUnbiasedInterruptTime   (KERNEL32.@)
+ */
+BOOL WINAPI QueryUnbiasedInterruptTime(ULONGLONG *time)
+{
+    TRACE("(%p)\n", time);
+    if (!time) return FALSE;
+    RtlQueryUnbiasedInterruptTime(time);
+    return TRUE;
 }

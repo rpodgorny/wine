@@ -25,6 +25,7 @@
 #include "winreg.h"
 #include "objbase.h"
 #include "taskschd.h"
+#include "schrpc.h"
 #include "taskschd_private.h"
 
 #include "wine/unicode.h"
@@ -116,26 +117,65 @@ static HRESULT WINAPI regtask_Invoke(IRegisteredTask *iface, DISPID dispid, REFI
 
 static HRESULT WINAPI regtask_get_Name(IRegisteredTask *iface, BSTR *name)
 {
-    FIXME("%p,%p: stub\n", iface, name);
-    return E_NOTIMPL;
+    RegisteredTask *regtask = impl_from_IRegisteredTask(iface);
+    const WCHAR *p_name;
+
+    TRACE("%p,%p\n", iface, name);
+
+    if (!name) return E_POINTER;
+
+    p_name = strrchrW(regtask->path, '\\');
+    if (!p_name)
+        p_name = regtask->path;
+    else
+        if (p_name[1] != 0) p_name++;
+
+    *name = SysAllocString(p_name);
+    if (!*name) return E_OUTOFMEMORY;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI regtask_get_Path(IRegisteredTask *iface, BSTR *path)
 {
-    FIXME("%p,%p: stub\n", iface, path);
-    return E_NOTIMPL;
+    RegisteredTask *regtask = impl_from_IRegisteredTask(iface);
+
+    TRACE("%p,%p\n", iface, path);
+
+    if (!path) return E_POINTER;
+
+    *path = SysAllocString(regtask->path);
+    if (!*path) return E_OUTOFMEMORY;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI regtask_get_State(IRegisteredTask *iface, TASK_STATE *state)
 {
-    FIXME("%p,%p: stub\n", iface, state);
-    return E_NOTIMPL;
+    RegisteredTask *regtask = impl_from_IRegisteredTask(iface);
+    DWORD enabled;
+
+    TRACE("%p,%p\n", iface, state);
+
+    if (!state) return E_POINTER;
+
+    return SchRpcGetTaskInfo(regtask->path, SCH_FLAG_STATE, &enabled, state);
 }
 
-static HRESULT WINAPI regtask_get_Enabled(IRegisteredTask *iface, VARIANT_BOOL *enabled)
+static HRESULT WINAPI regtask_get_Enabled(IRegisteredTask *iface, VARIANT_BOOL *v_enabled)
 {
-    FIXME("%p,%p: stub\n", iface, enabled);
-    return E_NOTIMPL;
+    RegisteredTask *regtask = impl_from_IRegisteredTask(iface);
+    DWORD enabled, state;
+    HRESULT hr;
+
+    TRACE("%p,%p\n", iface, v_enabled);
+
+    if (!v_enabled) return E_POINTER;
+
+    hr = SchRpcGetTaskInfo(regtask->path, 0, &enabled, &state);
+    if (hr == S_OK)
+        *v_enabled = enabled ? VARIANT_TRUE : VARIANT_FALSE;
+    return hr;
 }
 
 static HRESULT WINAPI regtask_put_Enabled(IRegisteredTask *iface, VARIANT_BOOL enabled)
@@ -266,18 +306,74 @@ static const IRegisteredTaskVtbl RegisteredTask_vtbl =
     regtask_GetRunTimes
 };
 
-HRESULT RegisteredTask_create(const WCHAR *path, const WCHAR *name, ITaskDefinition *definition,
+HRESULT RegisteredTask_create(const WCHAR *path, const WCHAR *name, ITaskDefinition *definition, LONG flags,
                               TASK_LOGON_TYPE logon, IRegisteredTask **obj, BOOL create)
 {
+    WCHAR *full_name;
     RegisteredTask *regtask;
+    HRESULT hr;
+
+    if (!name)
+    {
+        if (!create) return E_INVALIDARG;
+
+        /* NULL task name is allowed only in the root folder */
+        if (path[0] != '\\' || path[1])
+            return E_INVALIDARG;
+
+        full_name = NULL;
+    }
+    else
+    {
+        full_name = get_full_path(path, name);
+        if (!full_name) return E_OUTOFMEMORY;
+    }
 
     regtask = heap_alloc(sizeof(*regtask));
-    if (!regtask) return E_OUTOFMEMORY;
+    if (!regtask)
+    {
+        heap_free(full_name);
+        return E_OUTOFMEMORY;
+    }
+
+    if (create)
+    {
+        WCHAR *actual_path = NULL;
+        TASK_XML_ERROR_INFO *error_info = NULL;
+        BSTR xml = NULL;
+
+        hr = ITaskDefinition_get_XmlText(definition, &xml);
+        if (hr != S_OK || (hr = SchRpcRegisterTask(full_name, xml, flags, NULL, logon, 0, NULL, &actual_path, &error_info)) != S_OK)
+        {
+            heap_free(full_name);
+            heap_free(regtask);
+            SysFreeString(xml);
+            return hr;
+        }
+
+        heap_free(full_name);
+        full_name = heap_strdupW(actual_path);
+        MIDL_user_free(actual_path);
+    }
+    else
+    {
+        static const WCHAR languages[] = { 0 };
+        DWORD count = 0;
+        WCHAR *xml = NULL;
+
+        hr = SchRpcRetrieveTask(full_name, languages, &count, &xml);
+        if (hr != S_OK || (hr = ITaskDefinition_put_XmlText(definition, xml)) != S_OK)
+        {
+            heap_free(full_name);
+            heap_free(regtask);
+            return hr;
+        }
+        MIDL_user_free(xml);
+    }
 
     regtask->IRegisteredTask_iface.lpVtbl = &RegisteredTask_vtbl;
-    regtask->path = heap_strdupW(path);
+    regtask->path = full_name;
     regtask->ref = 1;
-    ITaskDefinition_AddRef(definition);
     regtask->taskdef = definition;
     *obj = &regtask->IRegisteredTask_iface;
 

@@ -3337,12 +3337,13 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
 #endif
 
 #ifdef HAS_IRDA
+#define MAX_IRDA_DEVICES 10
+
     case WS_SOL_IRLMP:
         switch(optname)
         {
         case WS_IRLMP_ENUMDEVICES:
         {
-            static const int MAX_IRDA_DEVICES = 10;
             char buf[sizeof(struct irda_device_list) +
                      (MAX_IRDA_DEVICES - 1) * sizeof(struct irda_device_info)];
             int res;
@@ -3402,6 +3403,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
             return SOCKET_ERROR;
         }
         break; /* case WS_SOL_IRLMP */
+#undef MAX_IRDA_DEVICES
 #endif
 
     /* Levels WS_IPPROTO_TCP and WS_IPPROTO_IP convert directly */
@@ -3671,6 +3673,40 @@ static const char *debugstr_wsaioctl(DWORD ioctl)
                             (USHORT)(ioctl & 0xffff));
 }
 
+/* do an ioctl call through the server */
+static DWORD server_ioctl_sock( SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size,
+                                LPVOID out_buff, DWORD out_size, LPDWORD ret_size,
+                                LPWSAOVERLAPPED overlapped,
+                                LPWSAOVERLAPPED_COMPLETION_ROUTINE completion )
+{
+    HANDLE event = overlapped ? overlapped->hEvent : 0;
+    HANDLE handle = SOCKET2HANDLE( s );
+    struct ws2_async *wsa;
+    NTSTATUS status;
+    PIO_STATUS_BLOCK io;
+
+    if (!(wsa = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*wsa) )))
+        return WSA_NOT_ENOUGH_MEMORY;
+    wsa->hSocket           = handle;
+    wsa->user_overlapped   = overlapped;
+    wsa->completion_func   = completion;
+    io = (overlapped ? (PIO_STATUS_BLOCK)overlapped : &wsa->local_iosb);
+
+    status = NtDeviceIoControlFile( handle, event, (PIO_APC_ROUTINE)ws2_async_apc, wsa, io, code,
+                                    in_buff, in_size, out_buff, out_size );
+    if (status == STATUS_NOT_SUPPORTED)
+    {
+        FIXME("Unsupported ioctl %x (device=%x access=%x func=%x method=%x)\n",
+              code, code >> 16, (code >> 14) & 3, (code >> 2) & 0xfff, code & 3);
+    }
+    else if (status == STATUS_SUCCESS)
+        *ret_size = io->Information; /* "Information" is the size written to the output buffer */
+
+    if (status != STATUS_PENDING) RtlFreeHeap( GetProcessHeap(), 0, wsa );
+
+    return NtStatusToWSAError( status );
+}
+
 /**********************************************************************
  *              WSAIoctl                (WS2_32.50)
  *
@@ -3682,8 +3718,8 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
     int fd;
     DWORD status = 0, total = 0;
 
-    TRACE("%ld, 0x%08x, %p, %d, %p, %d, %p, %p, %p\n",
-          s, code, in_buff, in_size, out_buff, out_size, ret_size, overlapped, completion);
+    TRACE("%ld, %s, %p, %d, %p, %d, %p, %p, %p\n",
+          s, debugstr_wsaioctl(code), in_buff, in_size, out_buff, out_size, ret_size, overlapped, completion);
 
     switch (code)
     {
@@ -3693,6 +3729,7 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
             WSASetLastError(WSAEFAULT);
             return SOCKET_ERROR;
         }
+        TRACE("-> FIONBIO (%x)\n", *(WS_u_long*)in_buff);
         if (_get_sock_mask(s))
         {
             /* AsyncSelect()'ed sockets are always nonblocking */
@@ -3861,12 +3898,6 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
            release_sock_fd( s, fd );
            break;
        }
-
-   case WS_SIO_ADDRESS_LIST_CHANGE:
-       FIXME("-> SIO_ADDRESS_LIST_CHANGE request: stub\n");
-       /* FIXME: error and return code depend on whether socket was created
-        * with WSA_FLAG_OVERLAPPED, but there is no easy way to get this */
-       break;
 
    case WS_SIO_ADDRESS_LIST_QUERY:
    {
@@ -4103,9 +4134,27 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
         WSASetLastError(WSAEOPNOTSUPP);
         return SOCKET_ERROR;
     default:
-        FIXME("unsupported WS_IOCTL cmd (%s)\n", debugstr_wsaioctl(code));
         status = WSAEOPNOTSUPP;
         break;
+    }
+
+    if (status == WSAEOPNOTSUPP)
+    {
+        status = server_ioctl_sock(s, code, in_buff, in_size, out_buff, out_size, &total,
+                                   overlapped, completion);
+        if (status != WSAEOPNOTSUPP)
+        {
+            if (status == 0 || status == WSA_IO_PENDING)
+                TRACE("-> %s request\n", debugstr_wsaioctl(code));
+            else
+                ERR("-> %s request failed with status 0x%x\n", debugstr_wsaioctl(code), status);
+
+            /* overlapped and completion operations will be handled by the server */
+            completion = NULL;
+            overlapped = NULL;
+        }
+        else
+            FIXME("unsupported WS_IOCTL cmd (%s)\n", debugstr_wsaioctl(code));
     }
 
     if (completion)
@@ -5035,31 +5084,41 @@ struct WS_hostent* WINAPI WS_gethostbyaddr(const char *addr, int len, int type)
 {
     struct WS_hostent *retval = NULL;
     struct hostent* host;
-
+    int unixtype = convert_af_w2u(type);
+    const char *paddr = addr;
+    unsigned long loopback;
 #ifdef HAVE_LINUX_GETHOSTBYNAME_R_6
     char *extrabuf;
-    int ebufsize=1024;
+    int ebufsize = 1024;
     struct hostent hostentry;
-    int locerr=ENOBUFS;
+    int locerr = ENOBUFS;
+#endif
+
+    /* convert back the magic loopback address if necessary */
+    if (unixtype == AF_INET && len == 4 && !memcmp(addr, magic_loopback_addr, 4))
+    {
+        loopback = htonl(INADDR_LOOPBACK);
+        paddr = (char*) &loopback;
+    }
+
+#ifdef HAVE_LINUX_GETHOSTBYNAME_R_6
     host = NULL;
     extrabuf=HeapAlloc(GetProcessHeap(),0,ebufsize) ;
     while(extrabuf) {
-        int res = gethostbyaddr_r(addr, len, type,
+        int res = gethostbyaddr_r(paddr, len, unixtype,
                                   &hostentry, extrabuf, ebufsize, &host, &locerr);
-        if( res != ERANGE) break;
+        if (res != ERANGE) break;
         ebufsize *=2;
         extrabuf=HeapReAlloc(GetProcessHeap(),0,extrabuf,ebufsize) ;
     }
-    if (!host) SetLastError((locerr < 0) ? wsaErrno() : wsaHerrno(locerr));
-#else
-    EnterCriticalSection( &csWSgetXXXbyYYY );
-    host = gethostbyaddr(addr, len, type);
-    if (!host) SetLastError((h_errno < 0) ? wsaErrno() : wsaHerrno(h_errno));
-#endif
-    if( host != NULL ) retval = WS_dup_he(host);
-#ifdef  HAVE_LINUX_GETHOSTBYNAME_R_6
+    if (host) retval = WS_dup_he(host);
+    else SetLastError((locerr < 0) ? wsaErrno() : wsaHerrno(locerr));
     HeapFree(GetProcessHeap(),0,extrabuf);
 #else
+    EnterCriticalSection( &csWSgetXXXbyYYY );
+    host = gethostbyaddr(paddr, len, unixtype);
+    if (host) retval = WS_dup_he(host);
+    else SetLastError((h_errno < 0) ? wsaErrno() : wsaHerrno(h_errno));
     LeaveCriticalSection( &csWSgetXXXbyYYY );
 #endif
     TRACE("ptr %p, len %d, type %d ret %p\n", addr, len, type, retval);
@@ -6359,7 +6418,7 @@ static struct WS_hostent *WS_dup_he(const struct hostent* p_he)
     p_to = WS_create_he(p_he->h_name, i + 1, alias_size, addresses + 1, p_he->h_length);
 
     if (!p_to) return NULL;
-    p_to->h_addrtype = p_he->h_addrtype;
+    p_to->h_addrtype = convert_af_u2w(p_he->h_addrtype);
     p_to->h_length = p_he->h_length;
 
     for(i = 0, p = p_to->h_addr_list[0]; p_he->h_addr_list[i]; i++, p += p_to->h_length)

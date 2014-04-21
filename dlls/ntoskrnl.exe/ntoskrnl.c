@@ -42,6 +42,7 @@
 #include "winioctl.h"
 #include "ddk/ntddk.h"
 #include "ddk/wdmguid.h"
+#include "ddk/ntifs.h"
 #include "wine/unicode.h"
 #include "wine/server.h"
 #include "wine/list.h"
@@ -2370,6 +2371,14 @@ void WINAPI KeInitializeTimer( PKTIMER Timer )
     KeInitializeTimerEx(Timer, NotificationTimer);
 }
 
+/***********************************************************************
+ *           KeInsertQueue   (NTOSKRNL.EXE.@)
+ */
+LONG WINAPI KeInsertQueue(PRKQUEUE Queue, PLIST_ENTRY Entry)
+{
+    FIXME( "stub: %p %p\n", Queue, Entry );
+    return 0;
+}
 
 /**********************************************************************
  *           KeQueryActiveProcessors   (NTOSKRNL.EXE.@)
@@ -2687,6 +2696,14 @@ PVOID WINAPI MmMapLockedPages(PMDL MemoryDescriptorList,
 }
 
 /***********************************************************************
+ *           MmLockPagableSectionByHandle  (NTOSKRNL.EXE.@)
+ */
+VOID WINAPI MmLockPagableSectionByHandle(PVOID ImageSectionHandle)
+{
+    FIXME("stub %p\n", ImageSectionHandle);
+}
+
+/***********************************************************************
  *           MmMapLockedPagesSpecifyCache  (NTOSKRNL.EXE.@)
  */
 PVOID WINAPI  MmMapLockedPagesSpecifyCache(PMDLX MemoryDescriptorList, KPROCESSOR_MODE AccessMode, MEMORY_CACHING_TYPE CacheType,
@@ -2697,6 +2714,13 @@ PVOID WINAPI  MmMapLockedPagesSpecifyCache(PMDLX MemoryDescriptorList, KPROCESSO
     return NULL;
 }
 
+/***********************************************************************
+ *           MmUnlockPagableImageSection  (NTOSKRNL.EXE.@)
+ */
+VOID WINAPI MmUnlockPagableImageSection(PVOID ImageSectionHandle)
+{
+    FIXME("stub %p\n", ImageSectionHandle);
+}
 
 /***********************************************************************
  *           MmPageEntireDriver   (NTOSKRNL.EXE.@)

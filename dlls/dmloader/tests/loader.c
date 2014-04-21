@@ -27,17 +27,26 @@ static unsigned char rifffile[8+4+8+16+8+256] = "RIFF\x24\x01\x00\x00WAVE" /* he
         "fmt \x10\x00\x00\x00\x01\x00\x20\x00\xAC\x44\x00\x00\x10\xB1\x02\x00\x04\x00\x10\x00" /* format segment: PCM, 2 chan, 44100 Hz, 16 bits */
         "data\x00\x01\x00\x00"; /* 256 byte data segment (silence) */
 
+static BOOL missing_dmloader(void)
+{
+    IDirectMusicLoader8 *dml;
+    HRESULT hr = CoCreateInstance(&CLSID_DirectMusicLoader, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IDirectMusicLoader8, (void**)&dml);
+
+    if (hr == S_OK && dml)
+    {
+        IDirectMusicLoader8_Release(dml);
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static void test_release_object(void)
 {
     HRESULT hr;
     IDirectMusicLoader8* loader = NULL;
 
     hr = CoCreateInstance(&CLSID_DirectMusicLoader, NULL, CLSCTX_INPROC, &IID_IDirectMusicLoader8, (void**)&loader);
-    if ( FAILED(hr) )
-    {
-        skip("CoCreateInstance failed.\n");
-        return;
-    }
 
     hr = IDirectMusicLoader_ReleaseObject(loader, NULL);
     ok(hr == E_POINTER, "Expected E_POINTER, received %#x\n", hr);
@@ -125,10 +134,103 @@ static void test_simple_playing(void)
     IDirectMusicLoader8_Release(loader);
 }
 
+static void test_COM(void)
+{
+    IDirectMusicLoader8 *dml8 = (IDirectMusicLoader8*)0xdeadbeef;
+    IUnknown *unk;
+    ULONG refcount;
+    HRESULT hr;
+
+    /* COM aggregation */
+    hr = CoCreateInstance(&CLSID_DirectMusicLoader, (IUnknown*)&dml8, CLSCTX_INPROC_SERVER,
+            &IID_IUnknown, (void**)&dml8);
+    ok(hr == CLASS_E_NOAGGREGATION,
+            "DirectMusicLoader create failed: %08x, expected CLASS_E_NOAGGREGATION\n", hr);
+    ok(!dml8, "dml8 = %p\n", dml8);
+
+    /* Invalid RIID */
+    hr = CoCreateInstance(&CLSID_DirectMusicLoader, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IDirectMusicObject, (void**)&dml8);
+    ok(hr == E_NOINTERFACE, "DirectMusicLoader create failed: %08x, expected E_NOINTERFACE\n", hr);
+
+    /* Same refcount for all DirectMusicLoader interfaces */
+    hr = CoCreateInstance(&CLSID_DirectMusicLoader, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IDirectMusicLoader8, (void**)&dml8);
+    ok(hr == S_OK, "DirectMusicLoader create failed: %08x, expected S_OK\n", hr);
+    refcount = IDirectMusicLoader8_AddRef(dml8);
+    ok(refcount == 2, "refcount == %u, expected 2\n", refcount);
+
+    hr = IDirectMusicLoader8_QueryInterface(dml8, &IID_IUnknown, (void**)&unk);
+    ok(hr == S_OK, "QueryInterface for IID_IUnknown failed: %08x\n", hr);
+    refcount = IUnknown_AddRef(unk);
+    ok(refcount == 4, "refcount == %u, expected 4\n", refcount);
+    refcount = IUnknown_Release(unk);
+
+    while (IDirectMusicLoader8_Release(dml8));
+}
+
+static void test_COM_container(void)
+{
+    IDirectMusicContainer *dmc = (IDirectMusicContainer*)0xdeadbeef;
+    IDirectMusicObject *dmo;
+    IPersistStream *ps;
+    IUnknown *unk;
+    ULONG refcount;
+    HRESULT hr;
+
+    /* COM aggregation */
+    hr = CoCreateInstance(&CLSID_DirectMusicContainer, (IUnknown*)&dmc, CLSCTX_INPROC_SERVER,
+            &IID_IUnknown, (void**)&dmc);
+    ok(hr == CLASS_E_NOAGGREGATION,
+            "DirectMusicContainer create failed: %08x, expected CLASS_E_NOAGGREGATION\n", hr);
+    ok(!dmc, "dmc = %p\n", dmc);
+
+    /* Invalid RIID */
+    hr = CoCreateInstance(&CLSID_DirectMusicContainer, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IClassFactory, (void**)&dmc);
+    ok(hr == E_NOINTERFACE, "DirectMusicContainer create failed: %08x, expected E_NOINTERFACE\n", hr);
+
+    /* Same refcount for all DirectMusicContainer interfaces */
+    hr = CoCreateInstance(&CLSID_DirectMusicContainer, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IDirectMusicContainer, (void**)&dmc);
+    ok(hr == S_OK, "DirectMusicContainer create failed: %08x, expected S_OK\n", hr);
+    refcount = IDirectMusicContainer_AddRef(dmc);
+    ok(refcount == 2, "refcount == %u, expected 2\n", refcount);
+
+    hr = IDirectMusicContainer_QueryInterface(dmc, &IID_IDirectMusicObject, (void**)&dmo);
+    ok(hr == S_OK, "QueryInterface for IID_IDirectMusicObject failed: %08x\n", hr);
+    refcount = IDirectMusicObject_AddRef(dmo);
+    ok(refcount == 4, "refcount == %u, expected 4\n", refcount);
+    refcount = IDirectMusicObject_Release(dmo);
+
+    hr = IDirectMusicContainer_QueryInterface(dmc, &IID_IPersistStream, (void**)&ps);
+    ok(hr == S_OK, "QueryInterface for IID_IPersistStream failed: %08x\n", hr);
+    refcount = IPersistStream_AddRef(ps);
+    ok(refcount == 5, "refcount == %u, expected 5\n", refcount);
+    refcount = IPersistStream_Release(ps);
+
+    hr = IDirectMusicContainer_QueryInterface(dmc, &IID_IUnknown, (void**)&unk);
+    ok(hr == S_OK, "QueryInterface for IID_IUnknown failed: %08x\n", hr);
+    refcount = IUnknown_AddRef(unk);
+    ok(refcount == 6, "refcount == %u, expected 6\n", refcount);
+    refcount = IUnknown_Release(unk);
+
+    while (IDirectMusicContainer_Release(dmc));
+}
+
 START_TEST(loader)
 {
     CoInitialize(NULL);
+
+    if (missing_dmloader())
+    {
+        skip("dmloader not available\n");
+        CoUninitialize();
+        return;
+    }
     test_release_object();
     test_simple_playing();
+    test_COM();
+    test_COM_container();
     CoUninitialize();
 }

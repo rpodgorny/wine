@@ -1198,11 +1198,8 @@ static BOOL ME_RTFInsertOleObject(RTF_Info *info, HENHMETAFILE hemf, HBITMAP hbm
   }
 
   if (OleCreateDefaultHandler(&CLSID_NULL, NULL, &IID_IOleObject, (void**)&lpObject) == S_OK &&
-#if 0
-      /* FIXME: enable it when rich-edit properly implements this method */
       IRichEditOle_GetClientSite(info->lpRichEditOle, &lpClientSite) == S_OK &&
       IOleObject_SetClientSite(lpObject, lpClientSite) == S_OK &&
-#endif
       IOleObject_GetUserClassID(lpObject, &clsid) == S_OK &&
       IOleObject_QueryInterface(lpObject, &IID_IOleCache, (void**)&lpOleCache) == S_OK &&
       IOleCache_Cache(lpOleCache, &fm, 0, &conn) == S_OK &&
@@ -1633,7 +1630,7 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
           ME_Cursor linebreakCursor = *selEnd;
 
           ME_MoveCursorChars(editor, &linebreakCursor, -linebreakSize);
-          ME_GetTextW(editor, lastchar, 2, &linebreakCursor, linebreakSize, 0);
+          ME_GetTextW(editor, lastchar, 2, &linebreakCursor, linebreakSize, FALSE);
           if (lastchar[0] == '\r' && (lastchar[1] == '\n' || lastchar[1] == '\0')) {
             ME_InternalDeleteText(editor, &linebreakCursor, linebreakSize, FALSE);
           }
@@ -2003,12 +2000,12 @@ static int ME_GetTextRange(ME_TextEditor *editor, WCHAR *strText,
 {
     if (!strText) return 0;
     if (unicode) {
-      return ME_GetTextW(editor, strText, INT_MAX, start, nLen, 0);
+      return ME_GetTextW(editor, strText, INT_MAX, start, nLen, FALSE);
     } else {
       int nChars;
       WCHAR *p = ALLOC_N_OBJ(WCHAR, nLen+1);
       if (!p) return 0;
-      nChars = ME_GetTextW(editor, p, nLen, start, nLen, 0);
+      nChars = ME_GetTextW(editor, p, nLen, start, nLen, FALSE);
       WideCharToMultiByte(CP_ACP, 0, p, nChars+1, (char *)strText,
                           nLen+1, NULL, NULL);
       FREE_OBJ(p);
@@ -2858,6 +2855,8 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
   ed->horz_si.nPage = 0;
   ed->horz_si.nPos = 0;
 
+  ed->wheel_remain = 0;
+
   OleInitialize(NULL);
 
   return ed;
@@ -2925,6 +2924,23 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     return TRUE;
 }
 
+static inline int get_default_line_height( ME_TextEditor *editor )
+{
+    int height = 0;
+
+    if (editor->pBuffer && editor->pBuffer->pDefaultStyle)
+        height = editor->pBuffer->pDefaultStyle->tm.tmHeight;
+    if (height <= 0) height = 24;
+
+    return height;
+}
+
+static inline int calc_wheel_change( int *remain, int amount_per_click )
+{
+    int change = amount_per_click * (float)*remain / WHEEL_DELTA;
+    *remain -= WHEEL_DELTA * change / amount_per_click;
+    return change;
+}
 
 static const char * const edit_messages[] = {
   "EM_GETSEL",
@@ -3142,11 +3158,14 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
    return ME_StreamOut(editor, wParam, (EDITSTREAM *)lParam);
   case WM_GETDLGCODE:
   {
-    UINT code = DLGC_WANTCHARS|DLGC_WANTTAB|DLGC_WANTARROWS|DLGC_HASSETSEL;
+    UINT code = DLGC_WANTCHARS|DLGC_WANTTAB|DLGC_WANTARROWS;
+
     if (lParam)
       editor->bDialogMode = TRUE;
     if (editor->styleFlags & ES_MULTILINE)
       code |= DLGC_WANTMESSAGE;
+    if (!(editor->styleFlags & ES_SAVESEL))
+      code |= DLGC_HASSETSEL;
     return code;
   }
   case EM_EMPTYUNDOBUFFER:
@@ -3545,7 +3564,7 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   {
     if (!(editor->styleFlags & ES_MULTILINE))
       return FALSE;
-    ME_ScrollDown(editor, lParam * 8); /* FIXME follow the original */
+    ME_ScrollDown( editor, lParam * get_default_line_height( editor ) );
     return TRUE;
   }
   case WM_CLEAR:
@@ -4132,6 +4151,7 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   case WM_KILLFOCUS:
     ME_CommitUndo(editor); /* End coalesced undos for typed characters */
     editor->bHaveFocus = FALSE;
+    editor->wheel_remain = 0;
     ME_HideCaret(editor);
     ME_SendOldNotify(editor, EN_KILLFOCUS);
     return 0;
@@ -4218,14 +4238,9 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   case WM_VSCROLL:
   {
     int origNPos;
-    int lineHeight;
+    int lineHeight = get_default_line_height( editor );
 
     origNPos = editor->vert_si.nPos;
-    lineHeight = 24;
-
-    if (editor->pBuffer && editor->pBuffer->pDefaultStyle)
-      lineHeight = editor->pBuffer->pDefaultStyle->tm.tmHeight;
-    if (lineHeight <= 0) lineHeight = 24;
 
     switch(LOWORD(wParam))
     {
@@ -4265,8 +4280,7 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   }
   case WM_MOUSEWHEEL:
   {
-    int gcWheelDelta;
-    UINT pulScrollLines;
+    int delta;
     BOOL ctrl_is_down;
 
     if ((editor->nEventMask & ENM_MOUSEEVENTS) &&
@@ -4275,9 +4289,16 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
 
     ctrl_is_down = GetKeyState(VK_CONTROL) & 0x8000;
 
-    gcWheelDelta = GET_WHEEL_DELTA_WPARAM(wParam);
+    delta = GET_WHEEL_DELTA_WPARAM(wParam);
 
-    if (abs(gcWheelDelta) >= WHEEL_DELTA)
+    /* if scrolling changes direction, ignore left overs */
+    if ((delta < 0 && editor->wheel_remain < 0) ||
+        (delta > 0 && editor->wheel_remain > 0))
+      editor->wheel_remain += delta;
+    else
+      editor->wheel_remain = delta;
+
+    if (editor->wheel_remain)
     {
       if (ctrl_is_down) {
         int numerator;
@@ -4287,14 +4308,18 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
         } else {
           numerator = editor->nZoomNumerator * 100 / editor->nZoomDenominator;
         }
-        numerator = numerator + (gcWheelDelta / WHEEL_DELTA) * 10;
+        numerator += calc_wheel_change( &editor->wheel_remain, 10 );
         if (numerator >= 10 && numerator <= 500)
           ME_SetZoom(editor, numerator, 100);
       } else {
-        SystemParametersInfoW(SPI_GETWHEELSCROLLLINES,0, &pulScrollLines, 0);
-        /* FIXME follow the original */
-        if (pulScrollLines)
-          ME_ScrollDown(editor,pulScrollLines * (-gcWheelDelta / WHEEL_DELTA) * 8);
+        UINT max_lines = 3;
+        int lines = 0;
+
+        SystemParametersInfoW( SPI_GETWHEELSCROLLLINES, 0, &max_lines, 0 );
+        if (max_lines)
+          lines = calc_wheel_change( &editor->wheel_remain, (int)max_lines );
+        if (lines)
+          ME_ScrollDown( editor, -lines * get_default_line_height( editor ) );
       }
     }
     break;
@@ -4702,7 +4727,7 @@ int ME_GetTextW(ME_TextEditor *editor, WCHAR *buffer, int buflen,
   int nLen;
 
   /* bCRLF flag is only honored in 2.0 and up. 1.0 must always return text verbatim */
-  if (editor->bEmulateVersion10) bCRLF = 0;
+  if (editor->bEmulateVersion10) bCRLF = FALSE;
 
   pRun = start->pRun;
   assert(pRun);
@@ -4987,7 +5012,7 @@ static BOOL ME_IsCandidateAnURL(ME_TextEditor *editor, const ME_Cursor *start, i
   WCHAR bufferW[MAX_PREFIX_LEN + 1];
   unsigned int i;
 
-  ME_GetTextW(editor, bufferW, MAX_PREFIX_LEN, start, nChars, 0);
+  ME_GetTextW(editor, bufferW, MAX_PREFIX_LEN, start, nChars, FALSE);
   for (i = 0; i < sizeof(prefixes) / sizeof(*prefixes); i++)
   {
     if (nChars < prefixes[i].length) continue;

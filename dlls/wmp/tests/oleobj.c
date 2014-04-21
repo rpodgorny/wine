@@ -788,6 +788,29 @@ static HRESULT cs_qi(REFIID riid, void **ppv)
     return S_OK;
 }
 
+static void test_wmp_ifaces(IOleObject *oleobj)
+{
+    IWMPSettings *settings, *settings_qi;
+    IWMPPlayer4 *player4;
+    HRESULT hres;
+
+    hres = IOleObject_QueryInterface(oleobj, &IID_IWMPPlayer4, (void**)&player4);
+    ok(hres == S_OK, "Could not get IWMPPlayer4 iface: %08x\n", hres);
+
+    settings = NULL;
+    hres = IWMPPlayer4_get_settings(player4, &settings);
+    ok(hres == S_OK, "get_settings failed: %08x\n", hres);
+    ok(settings != NULL, "settings = NULL\n");
+
+    hres = IOleObject_QueryInterface(oleobj, &IID_IWMPSettings, (void**)&settings_qi);
+    ok(hres == S_OK, "Could not get IWMPSettings iface: %08x\n", hres);
+    ok(settings == settings_qi, "settings != settings_qi\n");
+    IWMPSettings_Release(settings_qi);
+
+    IWMPSettings_Release(settings);
+    IWMPPlayer4_Release(player4);
+}
+
 #define test_rect_size(a,b,c) _test_rect_size(__LINE__,a,b,c)
 static void _test_rect_size(unsigned line, const RECT *r, int width, int height)
 {
@@ -877,6 +900,9 @@ static void test_wmp(void)
     hres = IOleObject_QueryInterface(oleobj, &IID_IOleInPlaceObject, (void**)&ipobj);
     ok(hres == S_OK, "Could not get IOleInPlaceObject iface: %08x\n", hres);
 
+    hres = IPersistStreamInit_InitNew(psi);
+    ok(hres == E_FAIL || broken(hres == S_OK /* Old WMP */), "InitNew failed: %08x\n", hres);
+
     SET_EXPECT(GetContainer);
     SET_EXPECT(GetExtendedControl);
     SET_EXPECT(GetWindow);
@@ -892,6 +918,11 @@ static void test_wmp(void)
     hres = IOleObject_GetClientSite(oleobj, &client_site);
     ok(hres == S_OK, "GetClientSite failed: %08x\n", hres);
     ok(client_site == &ClientSite, "client_site != ClientSite\n");
+
+    SET_EXPECT(GetWindow);
+    hres = IPersistStreamInit_InitNew(psi);
+    ok(hres == S_OK, "InitNew failed: %08x\n", hres);
+    CHECK_CALLED(GetWindow);
 
     hwnd = (HWND)0xdeadbeef;
     hres = IOleInPlaceObject_GetWindow(ipobj, &hwnd);
@@ -917,6 +948,21 @@ static void test_wmp(void)
     ok(hwnd != NULL, "hwnd = NULL\n");
 
     test_window(hwnd);
+
+    pos.left = 1;
+    pos.top = 2;
+    pos.right = 301;
+    pos.bottom = 312;
+    hres = IOleInPlaceObject_SetObjectRects(ipobj, &pos, &pos);
+    ok(hres == S_OK, "SetObjectRects failed: %08x\n", hres);
+    GetClientRect(hwnd, &pos);
+    test_rect_size(&pos, 300, 310);
+
+    test_wmp_ifaces(oleobj);
+
+    hres = IOleObject_DoVerb(oleobj, OLEIVERB_HIDE, NULL, &ClientSite, 0, container_hwnd, &pos);
+    ok(hres == S_OK, "DoVerb failed: %08x\n", hres);
+    ok(!IsWindowVisible(hwnd), "Window is visible\n");
 
     SET_EXPECT(OnShowWindow_FALSE);
     SET_EXPECT(OnInPlaceDeactivate);

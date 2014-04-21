@@ -1252,6 +1252,28 @@ GpStatus WINGDIPAPI GdipCloneBitmapArea(REAL x, REAL y, REAL width, REAL height,
                               srcBitmap->stride,
                               srcBitmap->bits + srcBitmap->stride * area.Y + PIXELFORMATBPP(srcBitmap->format) * area.X / 8,
                               srcBitmap->format, srcBitmap->image.palette);
+
+        if (stat == Ok && srcBitmap->image.palette)
+        {
+            ColorPalette *src_palette, *dst_palette;
+
+            src_palette = srcBitmap->image.palette;
+
+            dst_palette = GdipAlloc(sizeof(UINT) * 2 + sizeof(ARGB) * src_palette->Count);
+
+            if (dst_palette)
+            {
+                dst_palette->Flags = src_palette->Flags;
+                dst_palette->Count = src_palette->Count;
+                memcpy(dst_palette->Entries, src_palette->Entries, sizeof(ARGB) * src_palette->Count);
+
+                GdipFree((*dstBitmap)->image.palette);
+                (*dstBitmap)->image.palette = dst_palette;
+            }
+            else
+                stat = OutOfMemory;
+        }
+
         if (stat != Ok)
             GdipDisposeImage((GpImage*)*dstBitmap);
     }
@@ -4714,7 +4736,7 @@ GpStatus WINGDIPAPI GdipImageRotateFlip(GpImage *image, RotateFlipType type)
     GpBitmap *new_bitmap;
     GpBitmap *bitmap;
     int bpp, bytesperpixel;
-    int rotate_90, flip_x, flip_y;
+    BOOL rotate_90, flip_x, flip_y;
     int src_x_offset, src_y_offset;
     LPBYTE src_origin;
     UINT x, y, width, height;

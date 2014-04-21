@@ -138,7 +138,6 @@ static ULONG WINAPI xsltemplate_Release( IXSLTemplate *iface )
     if ( ref == 0 )
     {
         if (This->node) IXMLDOMNode_Release( This->node );
-        release_dispex(&This->dispex);
         heap_free( This );
     }
 
@@ -326,7 +325,6 @@ static ULONG WINAPI xslprocessor_Release( IXSLProcessor *iface )
             xslprocessor_par_free(&This->params, par);
 
         IXSLTemplate_Release(&This->stylesheet->IXSLTemplate_iface);
-        release_dispex(&This->dispex);
         heap_free( This );
     }
 
@@ -465,7 +463,7 @@ static HRESULT WINAPI xslprocessor_put_output(
     IStream *stream;
     HRESULT hr;
 
-    FIXME("(%p)->(%s): semi-stub\n", This, debugstr_variant(&output));
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&output));
 
     switch (V_VT(&output))
     {
@@ -475,8 +473,11 @@ static HRESULT WINAPI xslprocessor_put_output(
         break;
       case VT_UNKNOWN:
         hr = IUnknown_QueryInterface(V_UNKNOWN(&output), &IID_IStream, (void**)&stream);
+        if (FAILED(hr))
+            WARN("failed to get IStream from output, 0x%08x\n", hr);
         break;
       default:
+        FIXME("output type %d not handled\n", V_VT(&output));
         hr = E_FAIL;
     }
 
@@ -529,22 +530,8 @@ static HRESULT WINAPI xslprocessor_transform(
     if (!ret) return E_INVALIDARG;
 
     SysFreeString(This->outstr);
-
-    hr = node_transform_node_params(get_node_obj(This->input), This->stylesheet->node, &This->outstr, &This->params);
-    if (hr == S_OK)
-    {
-        if (This->output)
-        {
-            ULONG len = 0;
-
-            /* output to stream */
-            hr = IStream_Write(This->output, This->outstr, SysStringByteLen(This->outstr), &len);
-            *ret = len == SysStringByteLen(This->outstr) ? VARIANT_TRUE : VARIANT_FALSE;
-        }
-    }
-    else
-        *ret = VARIANT_FALSE;
-
+    hr = node_transform_node_params(get_node_obj(This->input), This->stylesheet->node, &This->outstr, This->output, &This->params);
+    *ret = hr == S_OK ? VARIANT_TRUE : VARIANT_FALSE;
     return hr;
 #else
     FIXME("libxml2 is required but wasn't present at compile time\n");

@@ -3880,9 +3880,8 @@ static void testGetCertChain(void)
     ok(ret, "CertGetCertificateChain failed: %08x\n", GetLastError());
     if (ret)
     {
-        ok(!(chain->TrustStatus.dwErrorStatus &
-         CERT_TRUST_IS_NOT_VALID_FOR_USAGE),
-         "didn't expect CERT_TRUST_IS_NOT_VALID_FOR_USAGE\n");
+        ok(!(chain->TrustStatus.dwErrorStatus & CERT_TRUST_IS_NOT_VALID_FOR_USAGE),
+           "didn't expect CERT_TRUST_IS_NOT_VALID_FOR_USAGE, got %x\n", chain->TrustStatus.dwErrorStatus);
         pCertFreeCertificateChain(chain);
     }
     oids[1] = one_two_three;
@@ -4041,6 +4040,13 @@ static void testGetCertChain(void)
     test_name_blob(&simple_chain->rgpElement[2]->pCertContext->pCertInfo->Subject, "US, GeoTrust Inc., GeoTrust Global CA");
 
     pCertFreeCertificateChain(chain);
+
+    /* Test HCCE_LOCAL_MACHINE */
+    ret = CertGetCertificateChain(HCCE_LOCAL_MACHINE, cert, &fileTime, store, &para, 0, NULL, &chain);
+    ok(ret, "CertGetCertificateChain failed: %u\n", GetLastError());
+    pCertFreeCertificateChain(chain);
+
+    CertFreeCertificateContext(cert);
     CertCloseStore(store, 0);
 }
 

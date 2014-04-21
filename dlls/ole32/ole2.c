@@ -157,7 +157,6 @@ extern void OLEClipbrd_Initialize(void);
  */
 static void OLEDD_Initialize(void);
 static LRESULT WINAPI  OLEDD_DragTrackerWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-static void OLEDD_TrackMouseMove(TrackerWindowInfo* trackerInfo);
 static void OLEDD_TrackStateChange(TrackerWindowInfo* trackerInfo);
 static DWORD OLEDD_GetButtonState(void);
 
@@ -2199,10 +2198,6 @@ static LRESULT WINAPI OLEDD_DragTrackerWindowProc(
     }
     case WM_TIMER:
     case WM_MOUSEMOVE:
-    {
-      OLEDD_TrackMouseMove((TrackerWindowInfo*)GetWindowLongPtrA(hwnd, 0));
-      break;
-    }
     case WM_LBUTTONUP:
     case WM_MBUTTONUP:
     case WM_RBUTTONUP:
@@ -2227,19 +2222,16 @@ static LRESULT WINAPI OLEDD_DragTrackerWindowProc(
 }
 
 /***
- * OLEDD_TrackMouseMove()
+ * OLEDD_TrackStateChange()
  *
  * This method is invoked while a drag and drop operation is in effect.
- * it will generate the appropriate callbacks in the drop source
- * and drop target. It will also provide the expected feedback to
- * the user.
  *
  * params:
  *    trackerInfo - Pointer to the structure identifying the
  *                  drag & drop operation that is currently
  *                  active.
  */
-static void OLEDD_TrackMouseMove(TrackerWindowInfo* trackerInfo)
+static void OLEDD_TrackStateChange(TrackerWindowInfo* trackerInfo)
 {
   HWND   hwndNewTarget = 0;
   HRESULT  hr = S_OK;
@@ -2251,6 +2243,10 @@ static void OLEDD_TrackMouseMove(TrackerWindowInfo* trackerInfo)
   pt.x = trackerInfo->curMousePos.x;
   pt.y = trackerInfo->curMousePos.y;
   hwndNewTarget = WindowFromPoint(pt);
+
+  trackerInfo->returnValue = IDropSource_QueryContinueDrag(trackerInfo->dropSource,
+                                                           trackerInfo->escPressed,
+                                                           trackerInfo->dwKeyState);
 
   /*
    * Every time, we re-initialize the effects passed to the
@@ -2268,7 +2264,8 @@ static void OLEDD_TrackMouseMove(TrackerWindowInfo* trackerInfo)
     IDropTarget_DragOver(trackerInfo->curDragTarget,
                          trackerInfo->dwKeyState,
                          trackerInfo->curMousePos,
-			 trackerInfo->pdwEffect);
+                         trackerInfo->pdwEffect);
+    *trackerInfo->pdwEffect &= trackerInfo->dwOKEffect;
   }
   else
   {
@@ -2310,6 +2307,7 @@ static void OLEDD_TrackMouseMove(TrackerWindowInfo* trackerInfo)
                                    trackerInfo->dwKeyState,
                                    trackerInfo->curMousePos,
                                    trackerInfo->pdwEffect);
+        *trackerInfo->pdwEffect &= trackerInfo->dwOKEffect;
 
         /* failed DragEnter() means invalid target */
         if (hr != S_OK)
@@ -2375,29 +2373,6 @@ static void OLEDD_TrackMouseMove(TrackerWindowInfo* trackerInfo)
 
     SetCursor(hCur);
   }
-}
-
-/***
- * OLEDD_TrackStateChange()
- *
- * This method is invoked while a drag and drop operation is in effect.
- * It is used to notify the drop target/drop source callbacks when
- * the state of the keyboard or mouse button change.
- *
- * params:
- *    trackerInfo - Pointer to the structure identifying the
- *                  drag & drop operation that is currently
- *                  active.
- */
-static void OLEDD_TrackStateChange(TrackerWindowInfo* trackerInfo)
-{
-  /*
-   * Ask the drop source what to do with the operation.
-   */
-  trackerInfo->returnValue = IDropSource_QueryContinueDrag(
-			       trackerInfo->dropSource,
-			       trackerInfo->escPressed,
-                               trackerInfo->dwKeyState);
 
   /*
    * All the return valued will stop the operation except the S_OK
@@ -2430,11 +2405,11 @@ static void OLEDD_TrackStateChange(TrackerWindowInfo* trackerInfo)
 	 */
         case DRAGDROP_S_DROP:
           if (*trackerInfo->pdwEffect != DROPEFFECT_NONE)
-            IDropTarget_Drop(trackerInfo->curDragTarget,
-                             trackerInfo->dataObject,
-                             trackerInfo->dwKeyState,
-                             trackerInfo->curMousePos,
-                             trackerInfo->pdwEffect);
+            trackerInfo->returnValue =  IDropTarget_Drop(trackerInfo->curDragTarget,
+                                                         trackerInfo->dataObject,
+                                                         trackerInfo->dwKeyState,
+                                                         trackerInfo->curMousePos,
+                                                         trackerInfo->pdwEffect);
           else
             IDropTarget_DragLeave(trackerInfo->curDragTarget);
           break;
@@ -2743,8 +2718,59 @@ done:
  */
 HRESULT WINAPI OleDoAutoConvert(LPSTORAGE pStg, LPCLSID pClsidNew)
 {
-    FIXME("(%p,%p) : stub\n",pStg,pClsidNew);
-    return E_NOTIMPL;
+    WCHAR *user_type_old, *user_type_new;
+    CLIPFORMAT cf;
+    STATSTG stat;
+    CLSID clsid;
+    HRESULT hr;
+
+    TRACE("(%p, %p)\n", pStg, pClsidNew);
+
+    *pClsidNew = CLSID_NULL;
+    if(!pStg)
+        return E_INVALIDARG;
+    hr = IStorage_Stat(pStg, &stat, STATFLAG_NONAME);
+    if(FAILED(hr))
+        return hr;
+
+    *pClsidNew = stat.clsid;
+    hr = OleGetAutoConvert(&stat.clsid, &clsid);
+    if(FAILED(hr))
+        return hr;
+
+    hr = IStorage_SetClass(pStg, &clsid);
+    if(FAILED(hr))
+        return hr;
+
+    hr = ReadFmtUserTypeStg(pStg, &cf, &user_type_old);
+    if(FAILED(hr)) {
+        cf = 0;
+        user_type_new = NULL;
+    }
+
+    hr = OleRegGetUserType(&clsid, USERCLASSTYPE_FULL, &user_type_new);
+    if(FAILED(hr))
+        user_type_new = NULL;
+
+    hr = WriteFmtUserTypeStg(pStg, cf, user_type_new);
+    CoTaskMemFree(user_type_new);
+    if(FAILED(hr))
+    {
+        CoTaskMemFree(user_type_old);
+        IStorage_SetClass(pStg, &stat.clsid);
+        return hr;
+    }
+
+    hr = SetConvertStg(pStg, TRUE);
+    if(FAILED(hr))
+    {
+        WriteFmtUserTypeStg(pStg, cf, user_type_old);
+        IStorage_SetClass(pStg, &stat.clsid);
+    }
+    else
+        *pClsidNew = clsid;
+    CoTaskMemFree(user_type_old);
+    return hr;
 }
 
 /******************************************************************************
@@ -2837,10 +2863,14 @@ static inline HRESULT PROPVARIANT_ValidateType(VARTYPE vt)
     case VT_UI2:
     case VT_UI4:
     case VT_UI8:
+    case VT_INT:
+    case VT_UINT:
     case VT_LPSTR:
     case VT_LPWSTR:
     case VT_FILETIME:
     case VT_BLOB:
+    case VT_DISPATCH:
+    case VT_UNKNOWN:
     case VT_STREAM:
     case VT_STORAGE:
     case VT_STREAMED_OBJECT:
@@ -2889,7 +2919,10 @@ HRESULT WINAPI PropVariantClear(PROPVARIANT * pvar) /* [in/out] */
 
     hr = PROPVARIANT_ValidateType(pvar->vt);
     if (FAILED(hr))
+    {
+        memset(pvar, 0, sizeof(*pvar));
         return hr;
+    }
 
     switch(pvar->vt)
     {
@@ -2910,8 +2943,12 @@ HRESULT WINAPI PropVariantClear(PROPVARIANT * pvar) /* [in/out] */
     case VT_UI2:
     case VT_UI4:
     case VT_UI8:
+    case VT_INT:
+    case VT_UINT:
     case VT_FILETIME:
         break;
+    case VT_DISPATCH:
+    case VT_UNKNOWN:
     case VT_STREAM:
     case VT_STREAMED_OBJECT:
     case VT_STORAGE:
@@ -2974,12 +3011,14 @@ HRESULT WINAPI PropVariantClear(PROPVARIANT * pvar) /* [in/out] */
             }
         }
         else
+        {
             WARN("Invalid/unsupported type %d\n", pvar->vt);
+            hr = STG_E_INVALIDPARAMETER;
+        }
     }
 
-    ZeroMemory(pvar, sizeof(*pvar));
-
-    return S_OK;
+    memset(pvar, 0, sizeof(*pvar));
+    return hr;
 }
 
 /***********************************************************************
@@ -3016,30 +3055,41 @@ HRESULT WINAPI PropVariantCopy(PROPVARIANT *pvarDest,      /* [out] */
     case VT_ERROR:
     case VT_I8:
     case VT_UI8:
+    case VT_INT:
+    case VT_UINT:
     case VT_R8:
     case VT_CY:
     case VT_DATE:
     case VT_FILETIME:
         break;
+    case VT_DISPATCH:
+    case VT_UNKNOWN:
     case VT_STREAM:
     case VT_STREAMED_OBJECT:
     case VT_STORAGE:
     case VT_STORED_OBJECT:
-        IUnknown_AddRef((LPUNKNOWN)pvarDest->u.pStream);
+        if (pvarDest->u.pStream)
+            IStream_AddRef(pvarDest->u.pStream);
         break;
     case VT_CLSID:
         pvarDest->u.puuid = CoTaskMemAlloc(sizeof(CLSID));
         *pvarDest->u.puuid = *pvarSrc->u.puuid;
         break;
     case VT_LPSTR:
-        len = strlen(pvarSrc->u.pszVal);
-        pvarDest->u.pszVal = CoTaskMemAlloc((len+1)*sizeof(CHAR));
-        CopyMemory(pvarDest->u.pszVal, pvarSrc->u.pszVal, (len+1)*sizeof(CHAR));
+        if (pvarSrc->u.pszVal)
+        {
+            len = strlen(pvarSrc->u.pszVal);
+            pvarDest->u.pszVal = CoTaskMemAlloc((len+1)*sizeof(CHAR));
+            CopyMemory(pvarDest->u.pszVal, pvarSrc->u.pszVal, (len+1)*sizeof(CHAR));
+        }
         break;
     case VT_LPWSTR:
-        len = lstrlenW(pvarSrc->u.pwszVal);
-        pvarDest->u.pwszVal = CoTaskMemAlloc((len+1)*sizeof(WCHAR));
-        CopyMemory(pvarDest->u.pwszVal, pvarSrc->u.pwszVal, (len+1)*sizeof(WCHAR));
+        if (pvarSrc->u.pwszVal)
+        {
+            len = lstrlenW(pvarSrc->u.pwszVal);
+            pvarDest->u.pwszVal = CoTaskMemAlloc((len+1)*sizeof(WCHAR));
+            CopyMemory(pvarDest->u.pwszVal, pvarSrc->u.pwszVal, (len+1)*sizeof(WCHAR));
+        }
         break;
     case VT_BLOB:
     case VT_BLOB_OBJECT:
@@ -3099,7 +3149,7 @@ HRESULT WINAPI PropVariantCopy(PROPVARIANT *pvarDest,      /* [out] */
                 return E_INVALIDARG;
             }
             len = pvarSrc->u.capropvar.cElems;
-            pvarDest->u.capropvar.pElems = CoTaskMemAlloc(len * elemSize);
+            pvarDest->u.capropvar.pElems = len ? CoTaskMemAlloc(len * elemSize) : NULL;
             if (pvarSrc->vt == (VT_VECTOR | VT_VARIANT))
             {
                 for (i = 0; i < len; i++)

@@ -1149,7 +1149,6 @@ static ULONG WINAPI schema_cache_Release(IXMLDOMSchemaCollection2* iface)
             heap_free(This->uris[i]);
         heap_free(This->uris);
         xmlHashFree(This->cache, cache_free);
-        release_dispex(&This->dispex);
         heap_free(This);
     }
 
@@ -1293,10 +1292,16 @@ static HRESULT WINAPI schema_cache_get(IXMLDOMSchemaCollection2* iface, BSTR uri
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_w(uri), node);
 
-    if (This->version == MSXML6) return E_NOTIMPL;
+    if (This->version == MSXML6)
+    {
+        if (node) *node = NULL;
+        return E_NOTIMPL;
+    }
 
     if (!node)
         return E_POINTER;
+
+    *node = NULL;
 
     name = uri ? xmlchar_from_wchar(uri) : xmlchar_from_wchar(emptyW);
     entry = (cache_entry*) xmlHashLookup(This->cache, name);
@@ -1306,7 +1311,6 @@ static HRESULT WINAPI schema_cache_get(IXMLDOMSchemaCollection2* iface, BSTR uri
     if (entry && entry->doc)
         return get_domdoc_from_xmldoc(entry->doc, (IXMLDOMDocument3**)node);
 
-    *node = NULL;
     return S_OK;
 }
 
@@ -1344,6 +1348,9 @@ static HRESULT WINAPI schema_cache_get_namespaceURI(IXMLDOMSchemaCollection2* if
 
     if (!uri)
         return E_POINTER;
+
+    if (This->version == MSXML6)
+        *uri = NULL;
 
     if (index >= This->count)
         return E_FAIL;

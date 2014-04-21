@@ -419,10 +419,12 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
             CHECK_EXPECT(Exec_IDM_STOP);
             return OLECMDERR_E_NOTSUPPORTED;
         case OLECMDID_UPDATETRAVELENTRY_DATARECOVERY:
+        case OLECMDID_PAGEAVAILABLE: /* TODO (IE11) */
+            return E_NOTIMPL;
         case 6058: /* TODO */
             return E_NOTIMPL;
         default:
-            ok(0, "unexpected nsCmdID %d\n", nCmdID);
+            ok(0, "unexpected nCmdID %d\n", nCmdID);
         }
     }else if(IsEqualGUID(&CGID_Explorer, pguidCmdGroup)) {
         switch(nCmdID) {
@@ -437,6 +439,7 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
         case 101: /* TODO (IE8) */
         case 109: /* TODO (IE9) */
         case 113: /* TODO (IE10) */
+        case 119: /* IE11 */
             return E_FAIL;
         default:
             ok(0, "unexpected nCmdID %d\n", nCmdID);
@@ -444,11 +447,14 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
     }else if(IsEqualGUID(&CGID_ShellDocView, pguidCmdGroup)) {
         switch(nCmdID) {
         case 105: /* TODO */
+        case 133: /* IE11 */
         case 134: /* TODO (IE10) */
+        case 135: /* IE11 */
         case 136: /* TODO (IE10) */
         case 138: /* TODO */
         case 140: /* TODO (Win7) */
         case 144: /* TODO */
+        case 178: /* IE11 */
             return E_FAIL;
         default:
             ok(0, "unexpected nCmdID %d\n", nCmdID);
@@ -3424,6 +3430,10 @@ static void test_WebBrowser(BOOL do_download, BOOL do_close)
             trace("GoForward...\n");
             test_go_forward(webbrowser, "http://test.winehq.org/tests/winehq_snapshot/");
             test_download(DWL_FROM_GOFORWARD|DWL_HTTP);
+        }else {
+            trace("Navigate2 repeated with the same URL...\n");
+            test_Navigate2(webbrowser, "about:blank");
+            test_download(DWL_EXPECT_BEFORE_NAVIGATE);
         }
 
         test_EnumVerbs(webbrowser);

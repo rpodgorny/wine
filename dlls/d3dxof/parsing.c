@@ -19,6 +19,7 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
 #include "wine/debug.h"
 
 #define COBJMACROS
@@ -90,7 +91,7 @@ static const char *debugstr_fourcc(DWORD fourcc)
         (char)(fourcc >> 16), (char)(fourcc >> 24));
 }
 
-static const char* get_primitive_string(WORD token)
+static const char* get_primitive_string(DWORD token)
 {
   switch(token)
   {

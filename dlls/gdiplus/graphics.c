@@ -1243,7 +1243,7 @@ static GpStatus brush_fill_pixels(GpGraphics *graphics, GpBrush *brush,
         INT min_y, max_y, min_x, max_x;
         INT x, y;
         ARGB outer_color;
-        static int transform_fixme_once;
+        static BOOL transform_fixme_once;
 
         if (fill->focus.X != 0.0 || fill->focus.Y != 0.0)
         {
@@ -1280,7 +1280,7 @@ static GpStatus brush_fill_pixels(GpGraphics *graphics, GpBrush *brush,
             if (!is_identity)
             {
                 FIXME("path gradient transform not implemented\n");
-                transform_fixme_once = 1;
+                transform_fixme_once = TRUE;
             }
         }
 
@@ -1314,7 +1314,7 @@ static GpStatus brush_fill_pixels(GpGraphics *graphics, GpBrush *brush,
         for (i=0; i<flat_path->pathdata.Count; i++)
         {
             int start_center_line=0, end_center_line=0;
-            int seen_start=0, seen_end=0, seen_center=0;
+            BOOL seen_start = FALSE, seen_end = FALSE, seen_center = FALSE;
             REAL center_distance;
             ARGB start_color, end_color;
             REAL dy, dx;
@@ -1374,17 +1374,17 @@ static GpStatus brush_fill_pixels(GpGraphics *graphics, GpBrush *brush,
 
                 if (!seen_start && yf >= start_point.Y)
                 {
-                    seen_start = 1;
+                    seen_start = TRUE;
                     start_center_line ^= 1;
                 }
                 if (!seen_end && yf >= end_point.Y)
                 {
-                    seen_end = 1;
+                    seen_end = TRUE;
                     end_center_line ^= 1;
                 }
                 if (!seen_center && yf >= center_point.Y)
                 {
-                    seen_center = 1;
+                    seen_center = TRUE;
                     start_center_line ^= 1;
                     end_center_line ^= 1;
                 }
@@ -2781,9 +2781,33 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
         debugstr_pointf(&points[2]));
 
     memcpy(ptf, points, 3 * sizeof(GpPointF));
+
+    /* Ensure source width/height is positive */
+    if (srcwidth < 0)
+    {
+        GpPointF tmp = ptf[1];
+        srcx = srcx + srcwidth;
+        srcwidth = -srcwidth;
+        ptf[2].X = ptf[2].X + ptf[1].X - ptf[0].X;
+        ptf[2].Y = ptf[2].Y + ptf[1].Y - ptf[0].Y;
+        ptf[1] = ptf[0];
+        ptf[0] = tmp;
+    }
+
+    if (srcheight < 0)
+    {
+        GpPointF tmp = ptf[2];
+        srcy = srcy + srcheight;
+        srcheight = -srcheight;
+        ptf[1].X = ptf[1].X + ptf[2].X - ptf[0].X;
+        ptf[1].Y = ptf[1].Y + ptf[2].Y - ptf[0].Y;
+        ptf[2] = ptf[0];
+        ptf[0] = tmp;
+    }
+
     ptf[3].X = ptf[2].X + ptf[1].X - ptf[0].X;
     ptf[3].Y = ptf[2].Y + ptf[1].Y - ptf[0].Y;
-    if (!srcwidth || !srcheight || ptf[3].X == ptf[0].X || ptf[3].Y == ptf[0].Y)
+    if (!srcwidth || !srcheight || (ptf[3].X == ptf[0].X && ptf[3].Y == ptf[0].Y))
         return Ok;
     transform_and_round_points(graphics, pti, ptf, 4);
 
@@ -2815,7 +2839,7 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
     else if (image->type == ImageTypeBitmap)
     {
         GpBitmap* bitmap = (GpBitmap*)image;
-        int use_software=0;
+        BOOL use_software = FALSE;
 
         TRACE("graphics: %.2fx%.2f dpi, fmt %#x, scale %f, image: %.2fx%.2f dpi, fmt %#x, color %08x\n",
             graphics->xres, graphics->yres,
@@ -2829,11 +2853,12 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
             ptf[1].X - ptf[0].X != srcwidth || ptf[2].Y - ptf[0].Y != srcheight ||
             srcx < 0 || srcy < 0 ||
             srcx + srcwidth > bitmap->width || srcy + srcheight > bitmap->height)
-            use_software = 1;
+            use_software = TRUE;
 
         if (use_software)
         {
             RECT dst_area;
+            GpRectF graphics_bounds;
             GpRect src_area;
             int i, x, y, src_stride, dst_stride;
             GpMatrix dst_to_src;
@@ -2859,7 +2884,17 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
                 if (dst_area.bottom < pti[i].y) dst_area.bottom = pti[i].y;
             }
 
+            stat = get_graphics_bounds(graphics, &graphics_bounds);
+            if (stat != Ok) return stat;
+
+            if (graphics_bounds.X > dst_area.left) dst_area.left = floorf(graphics_bounds.X);
+            if (graphics_bounds.Y > dst_area.top) dst_area.top = floorf(graphics_bounds.Y);
+            if (graphics_bounds.X + graphics_bounds.Width < dst_area.right) dst_area.right = ceilf(graphics_bounds.X + graphics_bounds.Width);
+            if (graphics_bounds.Y + graphics_bounds.Height < dst_area.bottom) dst_area.bottom = ceilf(graphics_bounds.Y + graphics_bounds.Height);
+
             TRACE("dst_area: %s\n", wine_dbgstr_rect(&dst_area));
+
+            if (IsRectEmpty(&dst_area)) return Ok;
 
             m11 = (ptf[1].X - ptf[0].X) / srcwidth;
             m21 = (ptf[2].X - ptf[0].X) / srcheight;
@@ -2906,8 +2941,7 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
 
             if (stat != Ok)
             {
-                if (src_data != dst_data)
-                    GdipFree(src_data);
+                GdipFree(src_data);
                 GdipFree(dst_data);
                 return stat;
             }
@@ -2956,7 +2990,7 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
         else
         {
             HDC hdc;
-            int temp_hdc=0, temp_bitmap=0;
+            BOOL temp_hdc = FALSE, temp_bitmap = FALSE;
             HBITMAP hbitmap, old_hbm=NULL;
 
             if (!(bitmap->format == PixelFormat16bppRGB555 ||
@@ -2970,8 +3004,8 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
 
                 /* we can't draw a bitmap of this format directly */
                 hdc = CreateCompatibleDC(0);
-                temp_hdc = 1;
-                temp_bitmap = 1;
+                temp_hdc = TRUE;
+                temp_bitmap = TRUE;
 
                 bih.biSize = sizeof(BITMAPINFOHEADER);
                 bih.biWidth = bitmap->width;
@@ -3005,7 +3039,7 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
                 else
                 {
                     GdipCreateHBITMAPFromBitmap(bitmap, &hbitmap, 0);
-                    temp_bitmap = 1;
+                    temp_bitmap = TRUE;
                 }
 
                 hdc = bitmap->hdc;
@@ -4357,12 +4391,24 @@ GpStatus gdip_format_string(HDC hdc,
     INT *hotkeyprefix_offsets=NULL;
     INT hotkeyprefix_count=0;
     INT hotkeyprefix_pos=0, hotkeyprefix_end_pos=0;
-    int seen_prefix=0;
+    BOOL seen_prefix = FALSE;
+    GpStringFormat *dyn_format=NULL;
 
     if(length == -1) length = lstrlenW(string);
 
     stringdup = GdipAlloc((length + 1) * sizeof(WCHAR));
     if(!stringdup) return OutOfMemory;
+
+    if (!format)
+    {
+        stat = GdipStringFormatGetGenericDefault(&dyn_format);
+        if (stat != Ok)
+        {
+            GdipFree(stringdup);
+            return stat;
+        }
+        format = dyn_format;
+    }
 
     nwidth = rect->Width;
     nheight = rect->Height;
@@ -4372,10 +4418,7 @@ GpStatus gdip_format_string(HDC hdc,
         if (!nheight) nheight = INT_MAX;
     }
 
-    if (format)
-        hkprefix = format->hkprefix;
-    else
-        hkprefix = HotkeyPrefixNone;
+    hkprefix = format->hkprefix;
 
     if (hkprefix == HotkeyPrefixShow)
     {
@@ -4404,11 +4447,11 @@ GpStatus gdip_format_string(HDC hdc,
             hotkeyprefix_offsets[hotkeyprefix_count++] = j;
         else if (!seen_prefix && hkprefix != HotkeyPrefixNone && string[i] == '&')
         {
-            seen_prefix = 1;
+            seen_prefix = TRUE;
             continue;
         }
 
-        seen_prefix = 0;
+        seen_prefix = FALSE;
 
         stringdup[j] = string[i];
         j++;
@@ -4416,8 +4459,7 @@ GpStatus gdip_format_string(HDC hdc,
 
     length = j;
 
-    if (format) halign = format->align;
-    else halign = StringAlignmentNear;
+    halign = format->align;
 
     while(sum < length){
         GetTextExtentExPointW(hdc, stringdup + sum, length - sum,
@@ -4510,13 +4552,13 @@ GpStatus gdip_format_string(HDC hdc,
             break;
 
         /* Stop if this was a linewrap (but not if it was a linebreak). */
-        if ((lret == fitcpy) && format &&
-            (format->attr & StringFormatFlagsNoWrap))
+        if ((lret == fitcpy) && (format->attr & StringFormatFlagsNoWrap))
             break;
     }
 
     GdipFree(stringdup);
     GdipFree(hotkeyprefix_offsets);
+    GdipDeleteStringFormat(dyn_format);
 
     return stat;
 }

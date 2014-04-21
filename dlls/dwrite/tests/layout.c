@@ -110,7 +110,16 @@ static void test_CreateGdiCompatibleTextLayout(void)
 static void test_CreateTextFormat(void)
 {
     IDWriteFontCollection *collection, *syscoll;
+    DWRITE_PARAGRAPH_ALIGNMENT paralign;
+    DWRITE_READING_DIRECTION readdir;
+    DWRITE_WORD_WRAPPING wrapping;
+    DWRITE_TEXT_ALIGNMENT align;
+    DWRITE_FLOW_DIRECTION flow;
+    DWRITE_LINE_SPACING_METHOD method;
+    DWRITE_TRIMMING trimming;
     IDWriteTextFormat *format;
+    FLOAT spacing, baseline;
+    IDWriteInlineObject *trimmingsign;
     HRESULT hr;
 
     hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
@@ -130,6 +139,61 @@ if (0) /* crashes on native */
     ok(collection == syscoll, "got %p, was %p\n", syscoll, collection);
     IDWriteFontCollection_Release(syscoll);
     IDWriteFontCollection_Release(collection);
+
+    /* default format properties */
+    align = IDWriteTextFormat_GetTextAlignment(format);
+    ok(align == DWRITE_TEXT_ALIGNMENT_LEADING, "got %d\n", align);
+
+    paralign = IDWriteTextFormat_GetParagraphAlignment(format);
+    ok(paralign == DWRITE_PARAGRAPH_ALIGNMENT_NEAR, "got %d\n", paralign);
+
+    wrapping = IDWriteTextFormat_GetWordWrapping(format);
+    ok(wrapping == DWRITE_WORD_WRAPPING_WRAP, "got %d\n", wrapping);
+
+    readdir = IDWriteTextFormat_GetReadingDirection(format);
+    ok(readdir == DWRITE_READING_DIRECTION_LEFT_TO_RIGHT, "got %d\n", readdir);
+
+    flow = IDWriteTextFormat_GetFlowDirection(format);
+    ok(flow == DWRITE_FLOW_DIRECTION_TOP_TO_BOTTOM, "got %d\n", flow);
+
+    hr = IDWriteTextFormat_GetLineSpacing(format, &method, &spacing, &baseline);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(spacing == 0.0, "got %f\n", spacing);
+    ok(baseline == 0.0, "got %f\n", baseline);
+    ok(method == DWRITE_LINE_SPACING_METHOD_DEFAULT, "got %d\n", method);
+
+    trimming.granularity = DWRITE_TRIMMING_GRANULARITY_WORD;
+    trimming.delimiter = 10;
+    trimming.delimiterCount = 10;
+    trimmingsign = (void*)0xdeadbeef;
+    hr = IDWriteTextFormat_GetTrimming(format, &trimming, &trimmingsign);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(trimming.granularity == DWRITE_TRIMMING_GRANULARITY_NONE, "got %d\n", trimming.granularity);
+    ok(trimming.delimiter == 0, "got %d\n", trimming.delimiter);
+    ok(trimming.delimiterCount == 0, "got %d\n", trimming.delimiterCount);
+    ok(trimmingsign == NULL, "got %p\n", trimmingsign);
+
+    /* setters */
+    hr = IDWriteTextFormat_SetTextAlignment(format, DWRITE_TEXT_ALIGNMENT_LEADING);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteTextFormat_SetParagraphAlignment(format, DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteTextFormat_SetWordWrapping(format, DWRITE_WORD_WRAPPING_WRAP);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteTextFormat_SetReadingDirection(format, DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteTextFormat_SetFlowDirection(format, DWRITE_FLOW_DIRECTION_TOP_TO_BOTTOM);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteTextFormat_SetLineSpacing(format, DWRITE_LINE_SPACING_METHOD_DEFAULT, 0.0, 0.0);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteTextFormat_SetTrimming(format, &trimming, NULL);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
 
     IDWriteTextFormat_Release(format);
 }
@@ -169,6 +233,35 @@ static void test_GetLocaleName(void)
     IDWriteTextFormat_Release(format);
 }
 
+static void test_CreateEllipsisTrimmingSign(void)
+{
+    DWRITE_BREAK_CONDITION before, after;
+    IDWriteTextFormat *format;
+    IDWriteInlineObject *sign;
+    HRESULT hr;
+
+    hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 10.0, enusW, &format);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    EXPECT_REF(format, 1);
+    hr = IDWriteFactory_CreateEllipsisTrimmingSign(factory, format, &sign);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    EXPECT_REF(format, 1);
+
+if (0) /* crashes on native */
+    hr = IDWriteInlineObject_GetBreakConditions(sign, NULL, NULL);
+
+    before = after = DWRITE_BREAK_CONDITION_CAN_BREAK;
+    hr = IDWriteInlineObject_GetBreakConditions(sign, &before, &after);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(before == DWRITE_BREAK_CONDITION_NEUTRAL, "got %d\n", before);
+    ok(after == DWRITE_BREAK_CONDITION_NEUTRAL, "got %d\n", after);
+
+    IDWriteInlineObject_Release(sign);
+    IDWriteTextFormat_Release(format);
+}
+
 START_TEST(layout)
 {
     HRESULT hr;
@@ -185,6 +278,7 @@ START_TEST(layout)
     test_CreateGdiCompatibleTextLayout();
     test_CreateTextFormat();
     test_GetLocaleName();
+    test_CreateEllipsisTrimmingSign();
 
     IDWriteFactory_Release(factory);
 }

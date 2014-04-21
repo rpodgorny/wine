@@ -21,6 +21,7 @@
 
 #define _WIN32_MSI 300
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <windows.h>
 #include <msiquery.h>
@@ -45,6 +46,7 @@ static INSTALLSTATE (WINAPI *pMsiGetComponentPathExA)
 static UINT (WINAPI *pMsiQueryFeatureStateExA)
     (LPCSTR, LPCSTR, MSIINSTALLCONTEXT, LPCSTR, INSTALLSTATE *);
 
+static BOOL (WINAPI *pCheckTokenMembership)(HANDLE,PSID,PBOOL);
 static BOOL (WINAPI *pConvertSidToStringSidA)(PSID, LPSTR *);
 static BOOL (WINAPI *pOpenProcessToken)(HANDLE, DWORD, PHANDLE);
 static LONG (WINAPI *pRegDeleteKeyExA)(HKEY, LPCSTR, REGSAM, DWORD);
@@ -78,7 +80,8 @@ static const char component_dat[] =
     "dangler\t{6091DF25-EF96-45F1-B8E9-A9B1420C7A3C}\tTARGETDIR\t4\t\tregdata\n"
     "component\t\tMSITESTDIR\t0\t1\tfile\n"
     "service_comp\t{935A0A91-22A3-4F87-BCA8-928FFDFE2353}\tMSITESTDIR\t0\t\tservice_file\n"
-    "service_comp2\t{3F7B04A4-9521-4649-BDC9-0C8722740A49}\tMSITESTDIR\t0\t\tservice_file2";
+    "service_comp2\t{3F7B04A4-9521-4649-BDC9-0C8722740A49}\tMSITESTDIR\t0\t\tservice_file2\n"
+    "service_comp3\t{DBCD1502-20E3-423F-B53E-F37E263CDC7E}\tMSITESTDIR\t0\t\t\n";
 
 static const char directory_dat[] =
     "Directory\tDirectory_Parent\tDefaultDir\n"
@@ -115,7 +118,8 @@ static const char feature_comp_dat[] =
     "Two\tTwo\n"
     "feature\tcomponent\n"
     "service_feature\tservice_comp\n"
-    "service_feature\tservice_comp2";
+    "service_feature\tservice_comp2\n"
+    "service_feature\tservice_comp3";
 
 static const char file_dat[] =
     "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
@@ -222,6 +226,14 @@ static const char service_install_dat[] =
     "ServiceInstall\tServiceInstall\n"
     "TestService\t[SERVNAME]\t[SERVDISP]\t2\t3\t0\t\tservice1[~]+group1[~]service2[~]+group2[~][~]\tTestService\t\t-a arg\tservice_comp\tdescription\n"
     "TestService2\tSERVNAME2]\t[SERVDISP2]\t2\t3\t0\t\tservice1[~]+group1[~]service2[~]+group2[~][~]\tTestService2\t\t-a arg\tservice_comp2\tdescription";
+
+static const char service_install2_dat[] =
+    "ServiceInstall\tName\tDisplayName\tServiceType\tStartType\tErrorControl\t"
+    "LoadOrderGroup\tDependencies\tStartName\tPassword\tArguments\tComponent_\tDescription\n"
+    "s72\ts255\tL255\ti4\ti4\ti4\tS255\tS255\tS255\tS255\tS255\ts72\tL255\n"
+    "ServiceInstall\tServiceInstall\n"
+    "TestService\tTestService\tTestService\t2\t3\t0\t\t\tTestService\t\t\tservice_comp\t\n"
+    "TestService4\tTestService4\tTestService4\t2\t3\t0\t\t\tTestService4\t\t\tservice_comp3\t\n";
 
 static const char service_control_dat[] =
     "ServiceControl\tName\tEvent\tArguments\tWait\tComponent_\n"
@@ -1320,6 +1332,95 @@ static const char rei_install_exec_seq_dat[] =
     "PublishProduct\t\t5200\n"
     "InstallFinalize\t\t6000\n";
 
+static const char rpi_file_dat[] =
+    "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
+    "s72\ts72\tl255\ti4\tS72\tS20\tI2\ti2\n"
+    "File\tFile\n"
+    "progid.txt\tprogid\tprogid.txt\t1000\t\t\t8192\t1\n";
+
+static const char rpi_feature_dat[] =
+    "Feature\tFeature_Parent\tTitle\tDescription\tDisplay\tLevel\tDirectory_\tAttributes\n"
+    "s38\tS38\tL64\tL255\tI2\ti2\tS72\ti2\n"
+    "Feature\tFeature\n"
+    "progid\t\t\tprogid feature\t1\t2\tMSITESTDIR\t0\n";
+
+static const char rpi_feature_comp_dat[] =
+    "Feature_\tComponent_\n"
+    "s38\ts72\n"
+    "FeatureComponents\tFeature_\tComponent_\n"
+    "progid\tprogid\n";
+
+static const char rpi_component_dat[] =
+    "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
+    "s72\tS38\ts72\ti2\tS255\tS72\n"
+    "Component\tComponent\n"
+    "progid\t{89A98345-F8A1-422E-A48B-0250B5809F2D}\tMSITESTDIR\t0\t\tprogid.txt\n";
+
+static const char rpi_appid_dat[] =
+    "AppId\tRemoteServerName\tLocalService\tServiceParameters\tDllSurrogate\tActivateAtStorage\tRunAsInteractiveUser\n"
+    "s38\tS255\tS255\tS255\tS255\tI2\tI2\n"
+    "AppId\tAppId\n"
+    "{CFCC3B38-E683-497D-9AB4-CB40AAFE307F}\t\t\t\t\t\t\n";
+
+static const char rpi_class_dat[] =
+    "CLSID\tContext\tComponent_\tProgId_Default\tDescription\tAppId_\tFileTypeMask\tIcon_\tIconIndex\tDefInprocHandler\tArgument\tFeature_\tAttributes\n"
+    "s38\ts32\ts72\tS255\tL255\tS38\tS255\tS72\tI2\tS32\tS255\ts38\tI2\n"
+    "Class\tCLSID\tContext\tComponent_\n"
+    "{110913E7-86D1-4BF3-9922-BA103FCDDDFA}\tLocalServer\tprogid\tWinetest.Class.1\tdescription\t{CFCC3B38-E683-497D-9AB4-CB40AAFE307F}\tmask1;mask2\t\t\t2\t\tprogid\t\n"
+    "{904E6BC9-F57F-4412-B460-D40DE2F256E2}\tLocalServer\tprogid\tWinetest.VerClass\tdescription\t{CFCC3B38-E683-497D-9AB4-CB40AAFE307F}\tmask1;mask2\t\t\t2\t\tprogid\t\n"
+    "{57C413FB-CA02-498A-81F6-7E769BDB7C97}\tLocalServer\tprogid\t\tdescription\t{CFCC3B38-E683-497D-9AB4-CB40AAFE307F}\tmask1;mask2\t\t\t2\t\tprogid\t\n";
+
+static const char rpi_extension_dat[] =
+    "Extension\tComponent_\tProgId_\tMIME_\tFeature_\n"
+    "s255\ts72\tS255\tS64\ts38\n"
+    "Extension\tExtension\tComponent_\n"
+    "winetest\tprogid\tWinetest.Extension\t\tprogid\n";
+
+static const char rpi_verb_dat[] =
+    "Extension_\tVerb\tSequence\tCommand\tArgument\n"
+    "s255\ts32\tI2\tL255\tL255\n"
+    "Verb\tExtension_\tVerb\n"
+    "winetest\tOpen\t1\t&Open\t/argument\n";
+
+static const char rpi_progid_dat[] =
+    "ProgId\tProgId_Parent\tClass_\tDescription\tIcon_\tIconIndex\n"
+    "s255\tS255\tS38\tL255\tS72\tI2\n"
+    "ProgId\tProgId\n"
+    "Winetest.Class.1\t\t{110913E7-86D1-4BF3-9922-BA103FCDDDFA}\tdescription\t\t\n"
+    "Winetest.Class\tWinetest.Class.1\t\tdescription\t\t\n"
+    "Winetest.Class.2\t\t{110913E7-86D1-4BF3-9922-BA103FCDDDFA}\tdescription\t\t\n"
+    "Winetest.VerClass.1\t\t{904E6BC9-F57F-4412-B460-D40DE2F256E2}\tdescription\t\t\n"
+    "Winetest.VerClass\tWinetest.VerClass.1\t\tdescription\t\t\n"
+    "Winetest.NoProgIdClass.1\t\t{57C413FB-CA02-498A-81F6-7E769BDB7C97}\tdescription\t\t\n"
+    "Winetest.NoProgIdClass\tWinetest.NoProgIdClass.1\t\tdescription\t\t\n"
+    "Winetest.Orphaned\t\t\tdescription\t\t\n"
+    "Winetest.Orphaned2\t\t\tdescription\t\t\n"
+    "Winetest.Extension\t\t\tdescription\t\t\n";
+
+static const char rpi_install_exec_seq_dat[] =
+    "Action\tCondition\tSequence\n"
+    "s72\tS255\tI2\n"
+    "InstallExecuteSequence\tAction\n"
+    "LaunchConditions\t\t100\n"
+    "CostInitialize\t\t800\n"
+    "FileCost\t\t900\n"
+    "CostFinalize\t\t1000\n"
+    "InstallValidate\t\t1400\n"
+    "InstallInitialize\t\t1500\n"
+    "ProcessComponents\t\t1600\n"
+    "RemoveFiles\t\t1700\n"
+    "UnregisterClassInfo\t\t3000\n"
+    "UnregisterExtensionInfo\t\t3200\n"
+    "UnregisterProgIdInfo\t\t3400\n"
+    "InstallFiles\t\t3600\n"
+    "RegisterClassInfo\t\t4000\n"
+    "RegisterExtensionInfo\t\t4200\n"
+    "RegisterProgIdInfo\t\t4400\n"
+    "RegisterProduct\t\t5000\n"
+    "PublishFeatures\t\t5100\n"
+    "PublishProduct\t\t5200\n"
+    "InstallFinalize\t\t6000\n";
+
 static const char rmi_file_dat[] =
     "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
     "s72\ts72\tl255\ti4\tS72\tS20\tI2\ti2\n"
@@ -1681,6 +1782,19 @@ static const msi_table sds_tables[] =
     ADD_TABLE(property)
 };
 
+static const msi_table sis_tables[] =
+{
+    ADD_TABLE(component),
+    ADD_TABLE(directory),
+    ADD_TABLE(feature),
+    ADD_TABLE(feature_comp),
+    ADD_TABLE(file),
+    ADD_TABLE(sds_install_exec_seq),
+    ADD_TABLE(service_install2),
+    ADD_TABLE(media),
+    ADD_TABLE(property)
+};
+
 static const msi_table sr_tables[] =
 {
     ADD_TABLE(component),
@@ -1867,6 +1981,23 @@ static const msi_table rei_tables[] =
     ADD_TABLE(rei_verb),
     ADD_TABLE(rei_progid),
     ADD_TABLE(rei_install_exec_seq),
+    ADD_TABLE(media),
+    ADD_TABLE(property)
+};
+
+static const msi_table rpi_tables[] =
+{
+    ADD_TABLE(directory),
+    ADD_TABLE(rpi_component),
+    ADD_TABLE(rpi_feature),
+    ADD_TABLE(rpi_feature_comp),
+    ADD_TABLE(rpi_file),
+    ADD_TABLE(rpi_appid),
+    ADD_TABLE(rpi_class),
+    ADD_TABLE(rpi_extension),
+    ADD_TABLE(rpi_verb),
+    ADD_TABLE(rpi_progid),
+    ADD_TABLE(rpi_install_exec_seq),
     ADD_TABLE(media),
     ADD_TABLE(property)
 };
@@ -2108,6 +2239,7 @@ static void init_functionpointers(void)
     GET_PROC(hmsi, MsiGetComponentPathExA);
     GET_PROC(hmsi, MsiQueryFeatureStateExA);
 
+    GET_PROC(hadvapi32, CheckTokenMembership);
     GET_PROC(hadvapi32, ConvertSidToStringSidA);
     GET_PROC(hadvapi32, OpenProcessToken);
     GET_PROC(hadvapi32, RegDeleteKeyExA)
@@ -2122,9 +2254,26 @@ static void init_functionpointers(void)
 
 static BOOL is_process_limited(void)
 {
+    SID_IDENTIFIER_AUTHORITY NtAuthority = {SECURITY_NT_AUTHORITY};
+    PSID Group;
+    BOOL IsInGroup;
     HANDLE token;
 
-    if (!pOpenProcessToken) return FALSE;
+    if (!pCheckTokenMembership || !pOpenProcessToken) return FALSE;
+
+    if (!AllocateAndInitializeSid(&NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID,
+                                  DOMAIN_ALIAS_RID_ADMINS,
+                                  0, 0, 0, 0, 0, 0, &Group) ||
+        !pCheckTokenMembership(NULL, Group, &IsInGroup))
+    {
+        trace("Could not check if the current user is an administrator\n");
+        return FALSE;
+    }
+    if (!IsInGroup)
+    {
+        /* Only administrators have enough privileges for these tests */
+        return TRUE;
+    }
 
     if (pOpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
     {
@@ -5263,6 +5412,78 @@ error:
     DeleteFileA(msifile);
 }
 
+static void test_install_services(void)
+{
+    UINT r;
+    SC_HANDLE manager, service;
+    BOOL ret;
+
+    if (is_process_limited())
+    {
+        skip("process is limited\n");
+        return;
+    }
+
+    create_test_files();
+    create_database(msifile, sis_tables, sizeof(sis_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        goto error;
+    }
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    manager = OpenSCManagerA(NULL, NULL, SC_MANAGER_ALL_ACCESS);
+    ok(manager != NULL, "can't open service manager\n");
+    if (!manager) goto error;
+
+    service = OpenServiceA(manager, "TestService", GENERIC_ALL);
+    ok(service != NULL, "TestService not installed\n");
+    CloseServiceHandle(service);
+
+    service = OpenServiceA(manager, "TestService4", GENERIC_ALL);
+    ok(service == NULL, "TestService4 installed\n");
+    CloseServiceHandle(manager);
+
+    r = MsiInstallProductA(msifile, "REMOVE=ALL");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    ok(delete_pf("msitest\\cabout\\new\\five.txt", TRUE), "File not installed\n");
+    ok(delete_pf("msitest\\cabout\\new", FALSE), "Directory not created\n");
+    ok(delete_pf("msitest\\cabout\\four.txt", TRUE), "File not installed\n");
+    ok(delete_pf("msitest\\cabout", FALSE), "Directory not created\n");
+    ok(delete_pf("msitest\\changed\\three.txt", TRUE), "File not installed\n");
+    ok(delete_pf("msitest\\changed", FALSE), "Directory not created\n");
+    ok(delete_pf("msitest\\first\\two.txt", TRUE), "File not installed\n");
+    ok(delete_pf("msitest\\first", FALSE), "Directory not created\n");
+    ok(delete_pf("msitest\\filename", TRUE), "File not installed\n");
+    ok(delete_pf("msitest\\one.txt", TRUE), "File not installed\n");
+    ok(delete_pf("msitest\\service.exe", TRUE), "File not installed\n");
+    ok(delete_pf("msitest\\service2.exe", TRUE), "File not installed\n");
+    ok(delete_pf("msitest", FALSE), "Directory not created\n");
+
+    manager = OpenSCManagerA(NULL, NULL, SC_MANAGER_ALL_ACCESS);
+    ok(manager != NULL, "can't open service manager\n");
+    if (!manager) goto error;
+
+    service = OpenServiceA(manager, "TestService", GENERIC_ALL);
+    ok(service != NULL, "TestService doesn't exist\n");
+
+    ret = DeleteService( service );
+    ok( ret, "failed to delete service %u\n", GetLastError() );
+
+    CloseServiceHandle(service);
+    CloseServiceHandle(manager);
+
+error:
+    delete_test_files();
+    DeleteFileA(msifile);
+}
+
 static void test_self_registration(void)
 {
     UINT r;
@@ -6121,6 +6342,132 @@ error:
     DeleteFileA(msifile);
 }
 
+static void test_register_progid_info(void)
+{
+    UINT r;
+    LONG res;
+    HKEY hkey;
+
+    if (is_process_limited())
+    {
+        skip("process is limited\n");
+        return;
+    }
+
+    create_test_files();
+    create_file("msitest\\progid.txt", 1000);
+    create_database(msifile, rpi_tables, sizeof(rpi_tables) / sizeof(msi_table));
+
+    res = RegCreateKeyExA(HKEY_CLASSES_ROOT, "Winetest.Orphaned", 0, NULL, 0,
+                          KEY_ALL_ACCESS, NULL, &hkey, NULL);
+    ok(res == ERROR_SUCCESS, "key not created\n");
+    RegCloseKey(hkey);
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        goto error;
+    }
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    if (is_64bit)
+        res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Wow6432Node\\CLSID\\{110913E7-86D1-4BF3-9922-BA103FCDDDFA}", &hkey);
+    else
+        res = RegOpenKeyA(HKEY_CLASSES_ROOT, "CLSID\\{110913E7-86D1-4BF3-9922-BA103FCDDDFA}", &hkey);
+    ok(res == ERROR_SUCCESS, "key not created\n");
+    RegCloseKey(hkey);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.Class.1", &hkey);
+    ok(res == ERROR_SUCCESS, "key not created\n");
+    RegCloseKey(hkey);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.Class", &hkey);
+    ok(res == ERROR_SUCCESS, "key not created\n");
+    RegCloseKey(hkey);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.Class.2", &hkey);
+    ok(res == ERROR_SUCCESS, "key not created\n");
+    RegCloseKey(hkey);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.VerClass.1", &hkey);
+    ok(res == ERROR_SUCCESS, "key not created\n");
+    RegCloseKey(hkey);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.VerClass", &hkey);
+    ok(res == ERROR_SUCCESS, "key not created\n");
+    RegCloseKey(hkey);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.NoProgIdClass.1", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key created\n");
+    if (res == ERROR_SUCCESS) RegCloseKey(hkey);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.NoProgIdClass", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key created\n");
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.Orphaned", &hkey);
+    ok(res == ERROR_SUCCESS, "key deleted\n");
+    if (res == ERROR_SUCCESS) RegCloseKey(hkey);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.Orphaned2", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key created\n");
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.Extension", &hkey);
+    ok(res == ERROR_SUCCESS, "key not created\n");
+    RegCloseKey(hkey);
+
+    r = MsiInstallProductA(msifile, "REMOVE=ALL");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    if (is_64bit)
+        res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Wow6432Node\\CLSID\\{110913E7-86D1-4BF3-9922-BA103FCDDDFA}", &hkey);
+    else
+        res = RegOpenKeyA(HKEY_CLASSES_ROOT, "CLSID\\{110913E7-86D1-4BF3-9922-BA103FCDDDFA}", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.Class.1", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.Class", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.Class.2", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.VerClass.1", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.VerClass", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.NoProgIdClass.1", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.NoProgIdClass", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.Orphaned", &hkey);
+    ok(res == ERROR_SUCCESS, "key deleted\n");
+    if (res == ERROR_SUCCESS) RegCloseKey(hkey);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.Orphaned2", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Winetest.Extension", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    ok(!delete_pf("msitest\\progid.txt", TRUE), "file not removed\n");
+    ok(!delete_pf("msitest", FALSE), "directory not removed\n");
+
+error:
+    DeleteFileA("msitest\\progid.txt");
+    delete_test_files();
+    DeleteFileA(msifile);
+    RegDeleteKeyA(HKEY_CLASSES_ROOT, "Winetest.Orphaned");
+}
+
 static void test_register_mime_info(void)
 {
     UINT r;
@@ -6476,6 +6823,7 @@ START_TEST(action)
     test_create_remove_folder();
     test_start_services();
     test_delete_services();
+    test_install_services();
     test_self_registration();
     test_register_font();
     test_validate_product_id();
@@ -6490,6 +6838,7 @@ START_TEST(action)
     test_remove_env_strings();
     test_register_class_info();
     test_register_extension_info();
+    test_register_progid_info();
     test_register_mime_info();
     test_publish_assemblies();
     test_remove_existing_products();

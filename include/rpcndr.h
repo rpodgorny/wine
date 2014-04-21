@@ -37,6 +37,7 @@ extern "C" {
 # define CONST_VTBL
 #endif
 
+#ifndef EXTERN_GUID
 #ifdef __cplusplus
 #define EXTERN_GUID(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
         EXTERN_C const GUID DECLSPEC_SELECTANY name DECLSPEC_HIDDEN; \
@@ -47,6 +48,7 @@ extern "C" {
         const GUID DECLSPEC_SELECTANY name DECLSPEC_HIDDEN; \
         const GUID DECLSPEC_SELECTANY name = \
 	{ l, w1, w2, { b1, b2,  b3,  b4,  b5,  b6,  b7,  b8 } }
+#endif
 #endif
 
 /* stupid #if can't handle casts... this __stupidity
@@ -427,7 +429,7 @@ typedef struct _MIDL_STUBLESS_PROXY_INFO
 } MIDL_STUBLESS_PROXY_INFO, *PMIDL_STUBLESS_PROXY_INFO;
 
 
-#if defined(__i386__) && !defined(__MSC_VER) && !defined(__MINGW32__) && !defined(__CYGWIN__)
+#if defined(__i386__) && !defined(_MSC_VER) && !defined(__MINGW32__) && !defined(__CYGWIN__)
 /* Calling convention for returning structures/unions is different between Windows and gcc on i386 */
 typedef LONG_PTR CLIENT_CALL_RETURN;
 #else

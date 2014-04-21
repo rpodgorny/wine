@@ -49,9 +49,6 @@ static void test_setlocale(void)
     ret = setlocale(20, "C");
     ok(ret == NULL, "ret = %s\n", ret);
 
-    ret = setlocale(LC_ALL, "");
-    ok(ret != NULL, "ret == NULL\n");
-
     ret = setlocale(LC_ALL, "C");
     ok(!strcmp(ret, "C"), "ret = %s\n", ret);
 
@@ -785,10 +782,8 @@ static void test__Gettnames(void)
 static void test___mb_cur_max_func(void)
 {
     int mb_cur_max;
-    CPINFO cp;
 
     setlocale(LC_ALL, "C");
-    GetCPInfo(CP_ACP, &cp);
 
     /* for newer Windows */
     if(!p___mb_cur_max_func)
@@ -812,13 +807,7 @@ static void test___mb_cur_max_func(void)
         win_skip("Skipping __p___mb_cur_max tests\n");
     else {
         mb_cur_max = *p__p___mb_cur_max();
-        if (cp.MaxCharSize != 1) {
-            todo_wine ok(mb_cur_max == cp.MaxCharSize, "mb_cur_max = %d, expected %d\n",
-                    mb_cur_max, cp.MaxCharSize);
-        }
-        else {
-            ok(mb_cur_max == 1, "mb_cur_max = %d, expected 1\n", mb_cur_max);
-        }
+        ok(mb_cur_max == 1, "mb_cur_max = %d, expected 1\n", mb_cur_max);
 
         /* some old Windows don't set chinese */
         if (!setlocale(LC_ALL, "chinese"))

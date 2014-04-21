@@ -689,6 +689,7 @@
 # @ stub RtlInitializeStackTraceDataBase
 @ stub RtlInsertElementGenericTable
 # @ stub RtlInsertElementGenericTableAvl
+@ cdecl -arch=x86_64 RtlInstallFunctionTableCallback(long long long ptr ptr wstr)
 @ stdcall RtlInt64ToUnicodeString(int64 long ptr)
 @ stdcall RtlIntegerToChar(long long long ptr)
 @ stdcall RtlIntegerToUnicodeString(long long ptr)
@@ -797,6 +798,7 @@
 @ stub RtlQuerySecurityObject
 @ stub RtlQueryTagHeap
 @ stdcall RtlQueryTimeZoneInformation(ptr)
+@ stdcall RtlQueryUnbiasedInterruptTime(ptr)
 @ stub RtlQueueApcWow64Thread
 @ stdcall RtlQueueWorkItem(ptr ptr long)
 @ stdcall -register RtlRaiseException(ptr)

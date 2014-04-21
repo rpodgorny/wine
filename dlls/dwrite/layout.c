@@ -42,7 +42,19 @@ struct dwrite_textformat_data {
     DWRITE_FONT_STYLE style;
     DWRITE_FONT_STRETCH stretch;
 
+    DWRITE_PARAGRAPH_ALIGNMENT paralign;
+    DWRITE_READING_DIRECTION readingdir;
+    DWRITE_WORD_WRAPPING wrapping;
+    DWRITE_TEXT_ALIGNMENT textalignment;
+    DWRITE_FLOW_DIRECTION flow;
+    DWRITE_LINE_SPACING_METHOD spacingmethod;
+
+    FLOAT spacing;
+    FLOAT baseline;
     FLOAT size;
+
+    DWRITE_TRIMMING trimming;
+    IDWriteInlineObject *trimmingsign;
 
     IDWriteFontCollection *collection;
 };
@@ -62,11 +74,17 @@ struct dwrite_textformat {
     struct dwrite_textformat_data format;
 };
 
+struct dwrite_trimmingsign {
+    IDWriteInlineObject IDWriteInlineObject_iface;
+    LONG ref;
+};
+
 static const IDWriteTextFormatVtbl dwritetextformatvtbl;
 
 static void release_format_data(struct dwrite_textformat_data *data)
 {
     if (data->collection) IDWriteFontCollection_Release(data->collection);
+    if (data->trimmingsign) IDWriteInlineObject_Release(data->trimmingsign);
     heap_free(data->family_name);
     heap_free(data->locale);
 }
@@ -84,6 +102,11 @@ static inline struct dwrite_textformat *impl_from_IDWriteTextFormat(IDWriteTextF
 static inline struct dwrite_textformat *unsafe_impl_from_IDWriteTextFormat(IDWriteTextFormat *iface)
 {
     return iface->lpVtbl == &dwritetextformatvtbl ? impl_from_IDWriteTextFormat(iface) : NULL;
+}
+
+static inline struct dwrite_trimmingsign *impl_from_IDWriteInlineObject(IDWriteInlineObject *iface)
+{
+    return CONTAINING_RECORD(iface, struct dwrite_trimmingsign, IDWriteInlineObject_iface);
 }
 
 static HRESULT WINAPI dwritetextlayout_QueryInterface(IDWriteTextLayout *iface, REFIID riid, void **obj)
@@ -690,6 +713,8 @@ static void layout_format_from_textformat(struct dwrite_textlayout *layout, IDWr
         layout->format = f->format;
         layout->format.locale = heap_strdupW(f->format.locale);
         layout->format.family_name = heap_strdupW(f->format.family_name);
+        if (layout->format.trimmingsign)
+            IDWriteInlineObject_AddRef(layout->format.trimmingsign);
     }
     else
     {
@@ -699,6 +724,17 @@ static void layout_format_from_textformat(struct dwrite_textlayout *layout, IDWr
         layout->format.style   = IDWriteTextFormat_GetFontStyle(format);
         layout->format.stretch = IDWriteTextFormat_GetFontStretch(format);
         layout->format.size    = IDWriteTextFormat_GetFontSize(format);
+        layout->format.textalignment = IDWriteTextFormat_GetTextAlignment(format);
+        layout->format.paralign = IDWriteTextFormat_GetParagraphAlignment(format);
+        layout->format.wrapping = IDWriteTextFormat_GetWordWrapping(format);
+        layout->format.readingdir = IDWriteTextFormat_GetReadingDirection(format);
+        layout->format.flow = IDWriteTextFormat_GetFlowDirection(format);
+        IDWriteTextFormat_GetLineSpacing(format,
+            &layout->format.spacingmethod,
+            &layout->format.spacing,
+            &layout->format.baseline
+        );
+        IDWriteTextFormat_GetTrimming(format, &layout->format.trimming, &layout->format.trimmingsign);
 
         /* locale name and length */
         locale_len = IDWriteTextFormat_GetLocaleNameLength(format);
@@ -732,6 +768,104 @@ HRESULT create_textlayout(const WCHAR *str, UINT32 len, IDWriteTextFormat *forma
     layout_format_from_textformat(This, format);
 
     *layout = &This->IDWriteTextLayout_iface;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI dwritetrimmingsign_QueryInterface(IDWriteInlineObject *iface, REFIID riid, void **obj)
+{
+    struct dwrite_trimmingsign *This = impl_from_IDWriteInlineObject(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), obj);
+
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDWriteInlineObject)) {
+        *obj = iface;
+        IDWriteInlineObject_AddRef(iface);
+        return S_OK;
+    }
+
+    *obj = NULL;
+    return E_NOINTERFACE;
+
+}
+
+static ULONG WINAPI dwritetrimmingsign_AddRef(IDWriteInlineObject *iface)
+{
+    struct dwrite_trimmingsign *This = impl_from_IDWriteInlineObject(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+    TRACE("(%p)->(%d)\n", This, ref);
+    return ref;
+}
+
+static ULONG WINAPI dwritetrimmingsign_Release(IDWriteInlineObject *iface)
+{
+    struct dwrite_trimmingsign *This = impl_from_IDWriteInlineObject(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p)->(%d)\n", This, ref);
+
+    if (!ref)
+        heap_free(This);
+
+    return ref;
+}
+
+static HRESULT WINAPI dwritetrimmingsign_Draw(IDWriteInlineObject *iface, void *context, IDWriteTextRenderer *renderer,
+    FLOAT originX, FLOAT originY, BOOL is_sideways, BOOL is_rtl, IUnknown *drawing_effect)
+{
+    struct dwrite_trimmingsign *This = impl_from_IDWriteInlineObject(iface);
+    FIXME("(%p)->(%p %p %f %f %d %d %p): stub\n", This, context, renderer, originX, originY, is_sideways, is_rtl, drawing_effect);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dwritetrimmingsign_GetMetrics(IDWriteInlineObject *iface, DWRITE_INLINE_OBJECT_METRICS *metrics)
+{
+    struct dwrite_trimmingsign *This = impl_from_IDWriteInlineObject(iface);
+    FIXME("(%p)->(%p): stub\n", This, metrics);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dwritetrimmingsign_GetOverhangMetrics(IDWriteInlineObject *iface, DWRITE_OVERHANG_METRICS *overhangs)
+{
+    struct dwrite_trimmingsign *This = impl_from_IDWriteInlineObject(iface);
+    FIXME("(%p)->(%p): stub\n", This, overhangs);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dwritetrimmingsign_GetBreakConditions(IDWriteInlineObject *iface, DWRITE_BREAK_CONDITION *before,
+        DWRITE_BREAK_CONDITION *after)
+{
+    struct dwrite_trimmingsign *This = impl_from_IDWriteInlineObject(iface);
+
+    TRACE("(%p)->(%p %p)\n", This, before, after);
+
+    *before = *after = DWRITE_BREAK_CONDITION_NEUTRAL;
+    return S_OK;
+}
+
+static const IDWriteInlineObjectVtbl dwritetrimmingsignvtbl = {
+    dwritetrimmingsign_QueryInterface,
+    dwritetrimmingsign_AddRef,
+    dwritetrimmingsign_Release,
+    dwritetrimmingsign_Draw,
+    dwritetrimmingsign_GetMetrics,
+    dwritetrimmingsign_GetOverhangMetrics,
+    dwritetrimmingsign_GetBreakConditions
+};
+
+HRESULT create_trimmingsign(IDWriteInlineObject **sign)
+{
+    struct dwrite_trimmingsign *This;
+
+    *sign = NULL;
+
+    This = heap_alloc(sizeof(struct dwrite_trimmingsign));
+    if (!This) return E_OUTOFMEMORY;
+
+    This->IDWriteInlineObject_iface.lpVtbl = &dwritetrimmingsignvtbl;
+    This->ref = 1;
+
+    *sign = &This->IDWriteInlineObject_iface;
 
     return S_OK;
 }
@@ -782,36 +916,41 @@ static ULONG WINAPI dwritetextformat_Release(IDWriteTextFormat *iface)
 static HRESULT WINAPI dwritetextformat_SetTextAlignment(IDWriteTextFormat *iface, DWRITE_TEXT_ALIGNMENT alignment)
 {
     struct dwrite_textformat *This = impl_from_IDWriteTextFormat(iface);
-    FIXME("(%p)->(%d): stub\n", This, alignment);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%d)\n", This, alignment);
+    This->format.textalignment = alignment;
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritetextformat_SetParagraphAlignment(IDWriteTextFormat *iface, DWRITE_PARAGRAPH_ALIGNMENT alignment)
 {
     struct dwrite_textformat *This = impl_from_IDWriteTextFormat(iface);
-    FIXME("(%p)->(%d): stub\n", This, alignment);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%d)\n", This, alignment);
+    This->format.paralign = alignment;
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritetextformat_SetWordWrapping(IDWriteTextFormat *iface, DWRITE_WORD_WRAPPING wrapping)
 {
     struct dwrite_textformat *This = impl_from_IDWriteTextFormat(iface);
-    FIXME("(%p)->(%d): stub\n", This, wrapping);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%d)\n", This, wrapping);
+    This->format.wrapping = wrapping;
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritetextformat_SetReadingDirection(IDWriteTextFormat *iface, DWRITE_READING_DIRECTION direction)
 {
     struct dwrite_textformat *This = impl_from_IDWriteTextFormat(iface);
-    FIXME("(%p)->(%d): stub\n", This, direction);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%d)\n", This, direction);
+    This->format.readingdir = direction;
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritetextformat_SetFlowDirection(IDWriteTextFormat *iface, DWRITE_FLOW_DIRECTION direction)
 {
     struct dwrite_textformat *This = impl_from_IDWriteTextFormat(iface);
-    FIXME("(%p)->(%d): stub\n", This, direction);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%d)\n", This, direction);
+    This->format.flow = direction;
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritetextformat_SetIncrementalTabStop(IDWriteTextFormat *iface, FLOAT tabstop)
@@ -825,51 +964,61 @@ static HRESULT WINAPI dwritetextformat_SetTrimming(IDWriteTextFormat *iface, DWR
     IDWriteInlineObject *trimming_sign)
 {
     struct dwrite_textformat *This = impl_from_IDWriteTextFormat(iface);
-    FIXME("(%p)->(%p %p): stub\n", This, trimming, trimming_sign);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p %p)\n", This, trimming, trimming_sign);
+
+    This->format.trimming = *trimming;
+    if (This->format.trimmingsign)
+        IDWriteInlineObject_Release(This->format.trimmingsign);
+    This->format.trimmingsign = trimming_sign;
+    if (This->format.trimmingsign)
+        IDWriteInlineObject_AddRef(This->format.trimmingsign);
+    return S_OK;
 }
 
-static HRESULT WINAPI dwritetextformat_SetLineSpacing(IDWriteTextFormat *iface, DWRITE_LINE_SPACING_METHOD spacing,
-    FLOAT line_spacing, FLOAT baseline)
+static HRESULT WINAPI dwritetextformat_SetLineSpacing(IDWriteTextFormat *iface, DWRITE_LINE_SPACING_METHOD method,
+    FLOAT spacing, FLOAT baseline)
 {
     struct dwrite_textformat *This = impl_from_IDWriteTextFormat(iface);
-    FIXME("(%p)->(%d %f %f): stub\n", This, spacing, line_spacing, baseline);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%d %f %f)\n", This, method, spacing, baseline);
+    This->format.spacingmethod = method;
+    This->format.spacing = spacing;
+    This->format.baseline = baseline;
+    return S_OK;
 }
 
 static DWRITE_TEXT_ALIGNMENT WINAPI dwritetextformat_GetTextAlignment(IDWriteTextFormat *iface)
 {
     struct dwrite_textformat *This = impl_from_IDWriteTextFormat(iface);
-    FIXME("(%p): stub\n", This);
-    return DWRITE_TEXT_ALIGNMENT_LEADING;
+    TRACE("(%p)\n", This);
+    return This->format.textalignment;
 }
 
 static DWRITE_PARAGRAPH_ALIGNMENT WINAPI dwritetextformat_GetParagraphAlignment(IDWriteTextFormat *iface)
 {
     struct dwrite_textformat *This = impl_from_IDWriteTextFormat(iface);
-    FIXME("(%p): stub\n", This);
-    return DWRITE_PARAGRAPH_ALIGNMENT_NEAR;
+    TRACE("(%p)\n", This);
+    return This->format.paralign;
 }
 
 static DWRITE_WORD_WRAPPING WINAPI dwritetextformat_GetWordWrapping(IDWriteTextFormat *iface)
 {
     struct dwrite_textformat *This = impl_from_IDWriteTextFormat(iface);
-    FIXME("(%p): stub\n", This);
-    return DWRITE_WORD_WRAPPING_NO_WRAP;
+    TRACE("(%p)\n", This);
+    return This->format.wrapping;
 }
 
 static DWRITE_READING_DIRECTION WINAPI dwritetextformat_GetReadingDirection(IDWriteTextFormat *iface)
 {
     struct dwrite_textformat *This = impl_from_IDWriteTextFormat(iface);
-    FIXME("(%p): stub\n", This);
-    return DWRITE_READING_DIRECTION_LEFT_TO_RIGHT;
+    TRACE("(%p)\n", This);
+    return This->format.readingdir;
 }
 
 static DWRITE_FLOW_DIRECTION WINAPI dwritetextformat_GetFlowDirection(IDWriteTextFormat *iface)
 {
     struct dwrite_textformat *This = impl_from_IDWriteTextFormat(iface);
-    FIXME("(%p): stub\n", This);
-    return DWRITE_FLOW_DIRECTION_TOP_TO_BOTTOM;
+    TRACE("(%p)\n", This);
+    return This->format.flow;
 }
 
 static FLOAT WINAPI dwritetextformat_GetIncrementalTabStop(IDWriteTextFormat *iface)
@@ -883,16 +1032,25 @@ static HRESULT WINAPI dwritetextformat_GetTrimming(IDWriteTextFormat *iface, DWR
     IDWriteInlineObject **trimming_sign)
 {
     struct dwrite_textformat *This = impl_from_IDWriteTextFormat(iface);
-    FIXME("(%p)->(%p %p): stub\n", This, options, trimming_sign);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p %p)\n", This, options, trimming_sign);
+
+    *options = This->format.trimming;
+    if ((*trimming_sign = This->format.trimmingsign))
+        IDWriteInlineObject_AddRef(*trimming_sign);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritetextformat_GetLineSpacing(IDWriteTextFormat *iface, DWRITE_LINE_SPACING_METHOD *method,
     FLOAT *spacing, FLOAT *baseline)
 {
     struct dwrite_textformat *This = impl_from_IDWriteTextFormat(iface);
-    FIXME("(%p)->(%p %p %p): stub\n", This, method, spacing, baseline);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p %p %p)\n", This, method, spacing, baseline);
+
+    *method = This->format.spacingmethod;
+    *spacing = This->format.spacing;
+    *baseline = This->format.baseline;
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritetextformat_GetFontCollection(IDWriteTextFormat *iface, IDWriteFontCollection **collection)
@@ -1022,6 +1180,18 @@ HRESULT create_textformat(const WCHAR *family_name, IDWriteFontCollection *colle
     This->format.style = style;
     This->format.size = size;
     This->format.stretch = stretch;
+    This->format.textalignment = DWRITE_TEXT_ALIGNMENT_LEADING;
+    This->format.paralign = DWRITE_PARAGRAPH_ALIGNMENT_NEAR;
+    This->format.wrapping = DWRITE_WORD_WRAPPING_WRAP;
+    This->format.readingdir = DWRITE_READING_DIRECTION_LEFT_TO_RIGHT;
+    This->format.flow = DWRITE_FLOW_DIRECTION_TOP_TO_BOTTOM;
+    This->format.spacingmethod = DWRITE_LINE_SPACING_METHOD_DEFAULT;
+    This->format.spacing = 0.0;
+    This->format.baseline = 0.0;
+    This->format.trimming.granularity = DWRITE_TRIMMING_GRANULARITY_NONE;
+    This->format.trimming.delimiter = 0;
+    This->format.trimming.delimiterCount = 0;
+    This->format.trimmingsign = NULL;
 
     if (collection)
     {

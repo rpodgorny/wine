@@ -35,6 +35,12 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
+struct __type_info_node
+{
+    void *memPtr;
+    struct __type_info_node* next;
+};
+
 typedef exception bad_cast;
 typedef exception bad_typeid;
 typedef exception __non_rtti_object;
@@ -1169,3 +1175,23 @@ int __cdecl _is_exception_typeof(const type_info *ti, EXCEPTION_POINTERS *ep)
     return ret;
 }
 #endif
+
+/*********************************************************************
+ * __clean_type_info_names_internal (MSVCR100.@)
+ */
+void CDECL __clean_type_info_names_internal(void *p)
+{
+    FIXME("(%p) stub\n", p);
+}
+
+/*********************************************************************
+ * ?_name_internal_method@type_info@@QBEPBDPAU__type_info_node@@@Z (MSVCR100.@)
+ */
+DEFINE_THISCALL_WRAPPER(type_info_name_internal_method,8)
+const char * __thiscall type_info_name_internal_method(type_info * _this, struct __type_info_node *node)
+{
+    static int once;
+    if (node && !once++) FIXME("type_info_node parameter ignored\n");
+
+    return MSVCRT_type_info_name(_this);
+}

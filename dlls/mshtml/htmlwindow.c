@@ -95,7 +95,7 @@ static inline HRESULT set_window_event(HTMLWindow *window, eventid_t eid, VARIAN
         return E_FAIL;
     }
 
-    return set_event_handler(&window->inner_window->doc->body_event_target, NULL, window->inner_window->doc, eid, var);
+    return set_event_handler(&window->inner_window->doc->body_event_target, window->inner_window->doc, eid, var);
 }
 
 static inline HRESULT get_window_event(HTMLWindow *window, eventid_t eid, VARIANT *var)
@@ -1617,7 +1617,7 @@ static HRESULT WINAPI HTMLWindow3_attachEvent(IHTMLWindow3 *iface, BSTR event, I
         return E_FAIL;
     }
 
-    return attach_event(&window->doc->body_event_target, NULL, &window->doc->basedoc, event, pDisp, pfResult);
+    return attach_event(&window->doc->body_event_target, &window->doc->basedoc, event, pDisp, pfResult);
 }
 
 static HRESULT WINAPI HTMLWindow3_detachEvent(IHTMLWindow3 *iface, BSTR event, IDispatch *pDisp)
@@ -2184,7 +2184,7 @@ static HRESULT WINAPI HTMLPrivateWindow_SuperNavigate(IHTMLPrivateWindow *iface,
         headers = V_BSTR(headers_var);
     }
 
-    hres = super_navigate(window, uri, BINDING_NAVIGATED, headers, post_data, post_data_size);
+    hres = super_navigate(window, uri, BINDING_NAVIGATED|BINDING_NOFRAG, headers, post_data, post_data_size);
     IUri_Release(uri);
     if(post_data)
         SafeArrayUnaccessData(V_ARRAY(post_data_var));

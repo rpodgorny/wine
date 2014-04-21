@@ -529,12 +529,15 @@ HRESULT WINAPI D3DXCreateTextureFromFileInMemoryEx(struct IDirect3DDevice9 *devi
     BOOL file_format = FALSE, file_miplevels = FALSE;
     BOOL dynamic_texture;
     D3DXIMAGE_INFO imginfo;
-    UINT loaded_miplevels;
+    UINT loaded_miplevels, skip_levels;
     D3DCAPS9 caps;
     HRESULT hr;
 
-    TRACE("(%p, %p, %u, %u, %u, %u, %x, %x, %x, %u, %u, %x, %p, %p, %p)\n", device, srcdata, srcdatasize, width,
-        height, miplevels, usage, format, pool, filter, mipfilter, colorkey, srcinfo, palette, texture);
+    TRACE("device %p, srcdata %p, srcdatasize %u, width %u, height %u, miplevels %u,"
+            " usage %#x, format %#x, pool %#x, filter %#x, mipfilter %#x, colorkey %#x,"
+            " srcinfo %p, palette %p, texture %p.\n",
+            device, srcdata, srcdatasize, width, height, miplevels, usage, format, pool,
+            filter, mipfilter, colorkey, srcinfo, palette, texture);
 
     /* check for invalid parameters */
     if (!device || !texture || !srcdata || !srcdatasize)
@@ -588,6 +591,21 @@ HRESULT WINAPI D3DXCreateTextureFromFileInMemoryEx(struct IDirect3DDevice9 *devi
         miplevels = imginfo.MipLevels;
     }
 
+    skip_levels = mipfilter != D3DX_DEFAULT ? mipfilter >> D3DX_SKIP_DDS_MIP_LEVELS_SHIFT : 0;
+    if (skip_levels && imginfo.MipLevels > skip_levels)
+    {
+        TRACE("Skipping the first %u (of %u) levels of a DDS mipmapped texture.\n",
+                skip_levels, imginfo.MipLevels);
+        TRACE("Texture level 0 dimensions are %ux%u.\n", imginfo.Width, imginfo.Height);
+        width >>= skip_levels;
+        height >>= skip_levels;
+        miplevels -= skip_levels;
+    }
+    else
+    {
+        skip_levels = 0;
+    }
+
     /* fix texture creation parameters */
     hr = D3DXCheckTextureRequirements(device, &width, &height, &miplevels, usage, &format, pool);
     if (FAILED(hr))
@@ -601,6 +619,12 @@ HRESULT WINAPI D3DXCreateTextureFromFileInMemoryEx(struct IDirect3DDevice9 *devi
     {
         FIXME("Generation of mipmaps for compressed pixel formats is not implemented yet\n");
         miplevels = imginfo.MipLevels;
+    }
+    if (imginfo.ResourceType == D3DRTYPE_VOLUMETEXTURE
+            && D3DFMT_DXT1 <= imginfo.Format && imginfo.Format <= D3DFMT_DXT5 && miplevels > 1)
+    {
+        FIXME("Generation of mipmaps for compressed pixel formats is not implemented yet.\n");
+        miplevels = 1;
     }
 
     if (((file_width) && (width != imginfo.Width))    ||
@@ -640,10 +664,12 @@ HRESULT WINAPI D3DXCreateTextureFromFileInMemoryEx(struct IDirect3DDevice9 *devi
         IDirect3DTexture9_GetSurfaceLevel(*texptr, 0, &surface);
         hr = D3DXLoadSurfaceFromFileInMemory(surface, palette, NULL, srcdata, srcdatasize, NULL, filter, colorkey, NULL);
         IDirect3DSurface9_Release(surface);
+        loaded_miplevels = min(IDirect3DTexture9_GetLevelCount(*texptr), imginfo.MipLevels);
     }
     else
     {
-        hr = load_texture_from_dds(*texptr, srcdata, palette, filter, colorkey, &imginfo);
+        hr = load_texture_from_dds(*texptr, srcdata, palette, filter, colorkey, &imginfo, skip_levels,
+                &loaded_miplevels);
     }
 
     if (FAILED(hr))
@@ -654,7 +680,6 @@ HRESULT WINAPI D3DXCreateTextureFromFileInMemoryEx(struct IDirect3DDevice9 *devi
         return hr;
     }
 
-    loaded_miplevels = min(IDirect3DTexture9_GetLevelCount(*texptr), imginfo.MipLevels);
     hr = D3DXFilterTexture((IDirect3DBaseTexture9*) *texptr, palette, loaded_miplevels - 1, mipfilter);
     if (FAILED(hr))
     {

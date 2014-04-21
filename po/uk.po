@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2014-01-17 12:58+0300\n"
+"PO-Revision-Date: 2014-04-02 17:53+0300\n"
 "Last-Translator: Andrey Gusev <andrey.goosev@gmail.com>\n"
 "Language-Team: none\n"
 "Language: Ukrainian\n"
@@ -2204,8 +2204,6 @@ msgstr ""
 "списку анульованих сертифікатів, чи списку довірених сертифікатів:"
 
 #: cryptui.rc:299
-#, fuzzy
-#| msgid "CMS/PKCS #7 Messages (*.p7b)"
 msgid "Cryptographic Message Syntax Standard/PKCS #7 Messages (*.p7b)"
 msgstr "Повідомлення CMS/PKCS #7 (*.p7b)"
 
@@ -2356,15 +2354,13 @@ msgstr "Виберіть формат, який ви хочете викорис
 
 #: cryptui.rc:408
 msgid "&DER-encoded X.509 (*.cer)"
-msgstr ""
+msgstr "X.509 в кодуванні &DER (*.cer)"
 
 #: cryptui.rc:410
 msgid "Ba&se64-encoded X.509 (*.cer):"
-msgstr ""
+msgstr "X.509 в кодуванні Ba&se64 (*.cer):"
 
 #: cryptui.rc:412
-#, fuzzy
-#| msgid "CMS/PKCS #7 Messages (*.p7b)"
 msgid "&Cryptographic Message Syntax Standard/PKCS #7 Message (*.p7b)"
 msgstr "Повідомлення CMS/PKCS #7 (*.p7b)"
 
@@ -4865,7 +4861,7 @@ msgstr "Елемент не знайдено.\n"
 
 #: winerror.mc:1571
 msgid "No match found.\n"
-msgstr "Немає співпадіння.\n"
+msgstr "Відповідностей не знайдено.\n"
 
 #: winerror.mc:1576
 msgid "Property set not found.\n"
@@ -6588,10 +6584,8 @@ msgid "The username could not be found.\n"
 msgstr "Ім'я користувача не знайдено.\n"
 
 #: winerror.mc:3741
-#, fuzzy
-#| msgid "The site does not exist.\n"
 msgid "This network connection does not exist.\n"
-msgstr "Сайт не існує.\n"
+msgstr "Цього мережевого з'єднання не існує.\n"
 
 #: localspl.rc:31 localui.rc:31 winspool.rc:30
 msgid "Local Port"
@@ -6824,7 +6818,7 @@ msgstr ""
 
 #: msi.rc:60
 msgid "enter which folder contains %s"
-msgstr "вкажіть папку, що містить %s"
+msgstr "вкажіть теку, що містить %s"
 
 #: msi.rc:61
 msgid "install source for feature missing"
@@ -6840,7 +6834,7 @@ msgstr "можливість з:"
 
 #: msi.rc:64
 msgid "choose which folder contains %s"
-msgstr "виберіть папку, що містить %s"
+msgstr "виберіть теку, що містить %s"
 
 #: msrle32.rc:31
 msgid "Wine MS-RLE video codec"
@@ -11706,6 +11700,90 @@ msgstr "Додає нове багаторядкове значення"
 #: regedit.rc:174
 msgid "Exports selected branch of the registry to a text file"
 msgstr "Експортує вибрану гілку реєстру до текстового файлу"
+
+#: regsvr32.rc:32
+msgid ""
+"Wine DLL Registration Utility\n"
+"\n"
+"Provides DLL registration services.\n"
+"\n"
+msgstr ""
+"Утиліта реєстрації DLL у Wine\n"
+"\n"
+"Слугує сервісом для реєстрації DLL\n"
+"\n"
+
+#: regsvr32.rc:40
+msgid ""
+"Usage:\n"
+"  regsvr32 [/u] [/s] [/n] [/i[:cmdline]] DllName\n"
+"\n"
+"Options:\n"
+"  [/u]  Unregister a server.\n"
+"  [/s]  Silent mode (no messages will be displayed).\n"
+"  [/i]  Call DllInstall, passing an optional [cmdline].\n"
+"\tWhen used with [/u] DllInstall is called in uninstall mode.\n"
+"  [/n]  Do not call DllRegisterServer. This option must be used with [/i].\n"
+"\n"
+msgstr ""
+"Використання:\n"
+"  regsvr32 [/u] [/s] [/n] [/i[:cmdline]] DllName\n"
+"\n"
+"Опції:\n"
+"  [/u]  Скасувати реєстрацію сервера.\n"
+"  [/s]  Тихий режим (повідомлення не відображатимуться).\n"
+"  [/i]  Виклик DllInstall з додатковими параметрами [cmdline].\n"
+"\tПри використанні з [/u] DllInstall буде викликана в режимі видалення.\n"
+"  [/n]  Не викликати DllRegisterServer. Має використовуватися з [/i].\n"
+"\n"
+
+#: regsvr32.rc:41
+msgid ""
+"regsvr32: Invalid or unrecognized switch [%1]\n"
+"\n"
+msgstr ""
+"regsvr32: Невірний або нерозпізнаний параметр [%1]\n"
+"\n"
+
+#: regsvr32.rc:42
+msgid "regsvr32: Failed to load DLL '%1'\n"
+msgstr "regsvr32: Не вдалося завантажити DLL '%1'\n"
+
+#: regsvr32.rc:43
+msgid "regsvr32: %1 not implemented in DLL '%2'\n"
+msgstr "regsvr32: %1 не реалізовано у DLL '%2'\n"
+
+#: regsvr32.rc:44
+msgid "regsvr32: Failed to register DLL '%1'\n"
+msgstr "regsvr32: Не вдалося зареєструвати DLL '%1'\n"
+
+#: regsvr32.rc:45
+msgid "regsvr32: Successfully registered DLL '%1'\n"
+msgstr "regsvr32: DLL '%1' успішно зареєстрована\n"
+
+#: regsvr32.rc:46
+msgid "regsvr32: Failed to unregister DLL '%1'\n"
+msgstr "regsvr32: Не вдалося скасувати реєстрацію DLL '%1'\n"
+
+#: regsvr32.rc:47
+msgid "regsvr32: Successfully unregistered DLL '%1'\n"
+msgstr "regsvr32: Реєстрація для DLL '%1' успішно скасована\n"
+
+#: regsvr32.rc:48
+msgid "regsvr32: Failed to install DLL '%1'\n"
+msgstr "regsvr32: Не вдалося встановити DLL '%1'\n"
+
+#: regsvr32.rc:49
+msgid "regsvr32: Successfully installed DLL '%1'\n"
+msgstr "regsvr32: DLL '%1' успішно встановлена\n"
+
+#: regsvr32.rc:50
+msgid "regsvr32: Failed to uninstall DLL '%1'\n"
+msgstr "regsvr32: Не вдалося видалити DLL '%1'\n"
+
+#: regsvr32.rc:51
+msgid "regsvr32: Successfully uninstalled DLL '%1'\n"
+msgstr "regsvr32: DLL '%1' успішно видалена\n"
 
 #: start.rc:55
 msgid ""

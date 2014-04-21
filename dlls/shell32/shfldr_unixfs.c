@@ -170,9 +170,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
 #if !defined(__MINGW32__) && !defined(_MSC_VER)
 
-#define ADJUST_THIS(c,m,p) ((c*)(((long)p)-(long)&(((c*)0)->lp##m##Vtbl)))
-#define STATIC_CAST(i,p) ((i*)&p->lp##i##Vtbl)
-
 #define LEN_SHITEMID_FIXED_PART ((USHORT) \
     ( sizeof(USHORT)      /* SHITEMID's cb field. */ \
     + sizeof(PIDLTYPE)    /* PIDLDATA's type field. */ \
@@ -971,14 +968,12 @@ static HRESULT WINAPI ShellFolder2_ParseDisplayName(IShellFolder2* iface, HWND h
     return result;
 }
 
-static IUnknown *UnixSubFolderIterator_Constructor(UnixFolder *pUnixFolder, SHCONTF fFilter);
+static IEnumIDList *UnixSubFolderIterator_Constructor(UnixFolder *pUnixFolder, SHCONTF fFilter);
 
 static HRESULT WINAPI ShellFolder2_EnumObjects(IShellFolder2* iface, HWND hwndOwner,
     SHCONTF grfFlags, IEnumIDList** ppEnumIDList)
 {
     UnixFolder *This = impl_from_IShellFolder2(iface);
-    IUnknown *newIterator;
-    HRESULT hr;
 
     TRACE("(%p)->(%p 0x%08x %p)\n", This, hwndOwner, grfFlags, ppEnumIDList);
 
@@ -987,11 +982,8 @@ static HRESULT WINAPI ShellFolder2_EnumObjects(IShellFolder2* iface, HWND hwndOw
         return E_UNEXPECTED;
     }
 
-    newIterator = UnixSubFolderIterator_Constructor(This, grfFlags);
-    hr = IUnknown_QueryInterface(newIterator, &IID_IEnumIDList, (void**)ppEnumIDList);
-    IUnknown_Release(newIterator);
-
-    return hr;
+    *ppEnumIDList = UnixSubFolderIterator_Constructor(This, grfFlags);
+    return S_OK;
 }
 
 static HRESULT CreateUnixFolder(IUnknown *pUnkOuter, REFIID riid, LPVOID *ppv, const CLSID *pCLSID);
@@ -2373,12 +2365,17 @@ HRESULT WINAPI MyDocuments_Constructor(IUnknown *pUnkOuter, REFIID riid, LPVOID 
 /* UnixSubFolderIterator object layout and typedef.
  */
 typedef struct _UnixSubFolderIterator {
-    const IEnumIDListVtbl *lpIEnumIDListVtbl;
-    LONG m_cRef;
+    IEnumIDList IEnumIDList_iface;
+    LONG ref;
     SHCONTF m_fFilter;
     DIR *m_dirFolder;
     char m_szFolder[FILENAME_MAX];
 } UnixSubFolderIterator;
+
+static inline UnixSubFolderIterator *impl_from_IEnumIDList(IEnumIDList *iface)
+{
+    return CONTAINING_RECORD(iface, UnixSubFolderIterator, IEnumIDList_iface);
+}
 
 static void UnixSubFolderIterator_Destroy(UnixSubFolderIterator *iterator) {
     TRACE("(iterator=%p)\n", iterator);
@@ -2405,35 +2402,34 @@ static HRESULT WINAPI UnixSubFolderIterator_IEnumIDList_QueryInterface(IEnumIDLi
     IEnumIDList_AddRef(iface);
     return S_OK;
 }
-                            
+
 static ULONG WINAPI UnixSubFolderIterator_IEnumIDList_AddRef(IEnumIDList* iface)
 {
-    UnixSubFolderIterator *This = ADJUST_THIS(UnixSubFolderIterator, IEnumIDList, iface);
+    UnixSubFolderIterator *This = impl_from_IEnumIDList(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(iface=%p)\n", iface);
-   
-    return InterlockedIncrement(&This->m_cRef);
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    return ref;
 }
 
 static ULONG WINAPI UnixSubFolderIterator_IEnumIDList_Release(IEnumIDList* iface)
 {
-    UnixSubFolderIterator *This = ADJUST_THIS(UnixSubFolderIterator, IEnumIDList, iface);
-    ULONG cRef;
-    
-    TRACE("(iface=%p)\n", iface);
+    UnixSubFolderIterator *This = impl_from_IEnumIDList(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
 
-    cRef = InterlockedDecrement(&This->m_cRef);
-    
-    if (!cRef) 
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    if (!ref)
         UnixSubFolderIterator_Destroy(This);
 
-    return cRef;
+    return ref;
 }
 
 static HRESULT WINAPI UnixSubFolderIterator_IEnumIDList_Next(IEnumIDList* iface, ULONG celt, 
     LPITEMIDLIST* rgelt, ULONG* pceltFetched)
 {
-    UnixSubFolderIterator *This = ADJUST_THIS(UnixSubFolderIterator, IEnumIDList, iface);
+    UnixSubFolderIterator *This = impl_from_IEnumIDList(iface);
     ULONG i = 0;
 
     /* This->m_dirFolder will be NULL if the user doesn't have access rights for the dir. */
@@ -2492,8 +2488,8 @@ static HRESULT WINAPI UnixSubFolderIterator_IEnumIDList_Skip(IEnumIDList* iface,
 
 static HRESULT WINAPI UnixSubFolderIterator_IEnumIDList_Reset(IEnumIDList* iface)
 {
-    UnixSubFolderIterator *This = ADJUST_THIS(UnixSubFolderIterator, IEnumIDList, iface);
-        
+    UnixSubFolderIterator *This = impl_from_IEnumIDList(iface);
+
     TRACE("(iface=%p)\n", iface);
 
     if (This->m_dirFolder)
@@ -2521,21 +2517,20 @@ static const IEnumIDListVtbl UnixSubFolderIterator_IEnumIDList_Vtbl = {
     UnixSubFolderIterator_IEnumIDList_Clone
 };
 
-static IUnknown *UnixSubFolderIterator_Constructor(UnixFolder *pUnixFolder, SHCONTF fFilter) {
+static IEnumIDList *UnixSubFolderIterator_Constructor(UnixFolder *pUnixFolder, SHCONTF fFilter)
+{
     UnixSubFolderIterator *iterator;
 
     TRACE("(pUnixFolder=%p)\n", pUnixFolder);
-    
-    iterator = SHAlloc((ULONG)sizeof(UnixSubFolderIterator));
-    iterator->lpIEnumIDListVtbl = &UnixSubFolderIterator_IEnumIDList_Vtbl;
-    iterator->m_cRef = 0;
+
+    iterator = SHAlloc(sizeof(*iterator));
+    iterator->IEnumIDList_iface.lpVtbl = &UnixSubFolderIterator_IEnumIDList_Vtbl;
+    iterator->ref = 1;
     iterator->m_fFilter = fFilter;
     iterator->m_dirFolder = opendir(pUnixFolder->m_pszPath);
     lstrcpyA(iterator->m_szFolder, pUnixFolder->m_pszPath);
 
-    UnixSubFolderIterator_IEnumIDList_AddRef((IEnumIDList*)iterator);
-    
-    return (IUnknown*)iterator;
+    return &iterator->IEnumIDList_iface;
 }
 
 #else /* __MINGW32__ || _MSC_VER */

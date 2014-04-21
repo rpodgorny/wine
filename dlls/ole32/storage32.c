@@ -7609,10 +7609,20 @@ HRESULT WINAPI StgOpenStorage(
   HANDLE         hFile = 0;
   DWORD          shareMode;
   DWORD          accessMode;
+  LPWSTR         temp_name = NULL;
 
   TRACE("(%s, %p, %x, %p, %d, %p)\n",
 	debugstr_w(pwcsName), pstgPriority, grfMode,
 	snbExclude, reserved, ppstgOpen);
+
+  if (pstgPriority)
+  {
+    /* FIXME: Copy ILockBytes instead? But currently for STGM_PRIORITY it'll be read-only. */
+    hr = StorageBaseImpl_GetFilename((StorageBaseImpl*)pstgPriority, &temp_name);
+    if (FAILED(hr)) goto end;
+    pwcsName = temp_name;
+    TRACE("using filename %s\n", debugstr_w(temp_name));
+  }
 
   if (pwcsName == 0)
   {
@@ -7775,6 +7785,8 @@ HRESULT WINAPI StgOpenStorage(
   *ppstgOpen = &newStorage->IStorage_iface;
 
 end:
+  CoTaskMemFree(temp_name);
+  if (pstgPriority) IStorage_Release(pstgPriority);
   TRACE("<-- %08x, IStorage %p\n", hr, ppstgOpen ? *ppstgOpen : NULL);
   return hr;
 }
@@ -8686,7 +8698,10 @@ static HRESULT STREAM_ReadString( IStream *stm, LPWSTR *string )
     len = MultiByteToWideChar( CP_ACP, 0, str, count, NULL, 0 );
     wstr = CoTaskMemAlloc( (len + 1)*sizeof (WCHAR) );
     if( wstr )
+    {
          MultiByteToWideChar( CP_ACP, 0, str, count, wstr, len );
+         wstr[len] = 0;
+    }
     CoTaskMemFree( str );
 
     *string = wstr;
@@ -8745,32 +8760,37 @@ static HRESULT STORAGE_WriteCompObj( LPSTORAGE pstg, CLSID *clsid,
 HRESULT WINAPI WriteFmtUserTypeStg(
 	  LPSTORAGE pstg, CLIPFORMAT cf, LPOLESTR lpszUserType)
 {
+    STATSTG stat;
     HRESULT r;
     WCHAR szwClipName[0x40];
-    CLSID clsid = CLSID_NULL;
+    CLSID clsid;
     LPWSTR wstrProgID = NULL;
     DWORD n;
 
     TRACE("(%p,%x,%s)\n",pstg,cf,debugstr_w(lpszUserType));
 
     /* get the clipboard format name */
-    n = GetClipboardFormatNameW( cf, szwClipName, sizeof(szwClipName)/sizeof(szwClipName[0]) );
-    szwClipName[n]=0;
+    if( cf )
+    {
+        n = GetClipboardFormatNameW( cf, szwClipName,
+                sizeof(szwClipName)/sizeof(szwClipName[0]) );
+        szwClipName[n]=0;
+    }
 
     TRACE("Clipboard name is %s\n", debugstr_w(szwClipName));
 
-    /* FIXME: There's room to save a CLSID and its ProgID, but
-       the CLSID is not looked up in the registry and in all the
-       tests I wrote it was CLSID_NULL.  Where does it come from?
-    */
+    r = IStorage_Stat(pstg, &stat, STATFLAG_NONAME);
+    if(SUCCEEDED(r))
+        clsid = stat.clsid;
+    else
+        clsid = CLSID_NULL;
 
-    /* get the real program ID.  This may fail, but that's fine */
     ProgIDFromCLSID(&clsid, &wstrProgID);
 
     TRACE("progid is %s\n",debugstr_w(wstrProgID));
 
-    r = STORAGE_WriteCompObj( pstg, &clsid, 
-                              lpszUserType, szwClipName, wstrProgID );
+    r = STORAGE_WriteCompObj( pstg, &clsid, lpszUserType,
+            cf ? szwClipName : NULL, wstrProgID );
 
     CoTaskMemFree(wstrProgID);
 
@@ -9491,51 +9511,52 @@ HRESULT WINAPI GetConvertStg(IStorage *stg)
  */
 HRESULT WINAPI SetConvertStg(IStorage *storage, BOOL convert)
 {
+    static const WCHAR stream_1oleW[] = {1,'O','l','e',0};
     DWORD flags = convert ? OleStream_Convert : 0;
+    IStream *stream;
+    DWORD header[2];
     HRESULT hr;
 
     TRACE("(%p, %d)\n", storage, convert);
 
-    hr = STORAGE_CreateOleStream(storage, flags);
-    if (hr == STG_E_FILEALREADYEXISTS)
+    hr = IStorage_OpenStream(storage, stream_1oleW, NULL, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, &stream);
+    if (FAILED(hr))
     {
-        static const WCHAR stream_1oleW[] = {1,'O','l','e',0};
-        IStream *stream;
-        DWORD header[2];
+        if (hr != STG_E_FILENOTFOUND)
+            return hr;
 
-        hr = IStorage_OpenStream(storage, stream_1oleW, NULL, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, &stream);
-        if (FAILED(hr)) return hr;
+        return STORAGE_CreateOleStream(storage, flags);
+    }
 
-        hr = IStream_Read(stream, header, sizeof(header), NULL);
+    hr = IStream_Read(stream, header, sizeof(header), NULL);
+    if (FAILED(hr))
+    {
+        IStream_Release(stream);
+        return hr;
+    }
+
+    /* update flag if differs */
+    if ((header[1] ^ flags) & OleStream_Convert)
+    {
+        LARGE_INTEGER pos = {{0}};
+
+        if (header[1] & OleStream_Convert)
+            flags = header[1] & ~OleStream_Convert;
+        else
+            flags = header[1] |  OleStream_Convert;
+
+        pos.QuadPart = sizeof(DWORD);
+        hr = IStream_Seek(stream, pos, STREAM_SEEK_SET, NULL);
         if (FAILED(hr))
         {
             IStream_Release(stream);
             return hr;
         }
 
-        /* update flag if differs */
-        if ((header[1] ^ flags) & OleStream_Convert)
-        {
-            LARGE_INTEGER pos;
-
-            if (header[1] & OleStream_Convert)
-                flags = header[1] & ~OleStream_Convert;
-            else
-                flags = header[1] |  OleStream_Convert;
-
-            pos.QuadPart = sizeof(DWORD);
-            hr = IStream_Seek(stream, pos, STREAM_SEEK_SET, NULL);
-            if (FAILED(hr))
-            {
-                IStream_Release(stream);
-                return hr;
-            }
-
-            hr = IStream_Write(stream, &flags, sizeof(flags), NULL);
-        }
-        IStream_Release(stream);
+        hr = IStream_Write(stream, &flags, sizeof(flags), NULL);
     }
 
+    IStream_Release(stream);
     return hr;
 }
 

@@ -38,7 +38,10 @@ PUBLIC_IDL_H_SRCS = \
 	downloadmgr.idl \
 	dwrite.idl \
 	dwrite_1.idl \
+	dwrite_2.idl \
 	dxgi.idl \
+	dxgi1_2.idl \
+	dxva2api.idl \
 	endpointvolume.idl \
 	exdisp.idl \
 	fusion.idl \
@@ -74,8 +77,10 @@ PUBLIC_IDL_H_SRCS = \
 	msxml.idl \
 	msxml2.idl \
 	msxml6.idl \
+	netcfgx.idl \
 	netcon.idl \
 	netfw.idl \
+	netlistmgr.idl \
 	oaidl.idl \
 	objectarray.idl \
 	objidl.idl \
@@ -244,6 +249,7 @@ SRCDIR_INCLUDES = \
 	ddk/ntddk.h \
 	ddk/ntddser.h \
 	ddk/ntddtape.h \
+	ddk/ntifs.h \
 	ddk/usb.h \
 	ddk/usb100.h \
 	ddk/usb200.h \
@@ -328,6 +334,7 @@ SRCDIR_INCLUDES = \
 	gdipluspixelformats.h \
 	gdiplustypes.h \
 	guiddef.h \
+	highlevelmonitorconfigurationapi.h \
 	hlguids.h \
 	htmlhelp.h \
 	http.h \
@@ -371,6 +378,7 @@ SRCDIR_INCLUDES = \
 	lmuseflg.h \
 	lmwksta.h \
 	loadperf.h \
+	lowlevelmonitorconfigurationapi.h \
 	lzexpand.h \
 	mapi.h \
 	mapicode.h \
@@ -473,6 +481,7 @@ SRCDIR_INCLUDES = \
 	patchapi.h \
 	pdh.h \
 	pdhmsg.h \
+	physicalmonitorenumerationapi.h \
 	pktdef.h \
 	poppack.h \
 	powrprof.h \

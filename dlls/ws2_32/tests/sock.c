@@ -297,22 +297,12 @@ static void read_zero_bytes ( SOCKET s )
     ok ( n <= 0, "garbage data received: %d bytes\n", n );
 }
 
-static int do_oob_send ( SOCKET s, char *buf, int buflen, int sendlen )
+static int do_synchronous_send ( SOCKET s, char *buf, int buflen, int sendlen, int flags )
 {
     char* last = buf + buflen, *p;
     int n = 1;
     for ( p = buf; n > 0 && p < last; p += n )
-        n = send ( s, p, min ( sendlen, last - p ), MSG_OOB );
-    wsa_ok ( n, 0 <=, "do_oob_send (%x): error %d\n" );
-    return p - buf;
-}
-
-static int do_synchronous_send ( SOCKET s, char *buf, int buflen, int sendlen )
-{
-    char* last = buf + buflen, *p;
-    int n = 1;
-    for ( p = buf; n > 0 && p < last; p += n )
-        n = send ( s, p, min ( sendlen, last - p ), 0 );
+        n = send ( s, p, min ( sendlen, last - p ), flags );
     wsa_ok ( n, 0 <=, "do_synchronous_send (%x): error %d\n" );
     return p - buf;
 }
@@ -551,7 +541,7 @@ static VOID WINAPI simple_server ( server_params *par )
         ok ( pos == -1, "simple_server (%x): test pattern error: %d\n", id, pos);
 
         /* Echo data back */
-        n_sent = do_synchronous_send ( mem->sock[0].s, mem->sock[0].buf, n_expected, par->buflen );
+        n_sent = do_synchronous_send ( mem->sock[0].s, mem->sock[0].buf, n_expected, par->buflen, 0 );
         ok ( n_sent == n_expected,
              "simple_server (%x): sent less data than expected: %d of %d\n", id, n_sent, n_expected );
 
@@ -573,7 +563,7 @@ static VOID WINAPI oob_server ( server_params *par )
     test_params *gen = par->general;
     server_memory *mem;
     u_long atmark = 0;
-    int pos, n_recvd, n_expected = gen->n_chunks * gen->chunk_size, tmp,
+    int pos, n_sent, n_recvd, n_expected = gen->n_chunks * gen->chunk_size, tmp,
         id = GetCurrentThreadId();
 
     trace ( "oob_server (%x) starting\n", id );
@@ -598,17 +588,23 @@ static VOID WINAPI oob_server ( server_params *par )
     ok ( mem->sock[0].peer.sin_addr.s_addr == inet_addr ( gen->inet_addr ),
          "oob_server (%x): strange peer address\n", id );
 
-    /* check atmark state */
+    /* check initial atmark state */
     ioctlsocket ( mem->sock[0].s, SIOCATMARK, &atmark );
     ok ( atmark == 1, "oob_server (%x): unexpectedly at the OOB mark: %i\n", id, atmark );
 
-    /* Receive normal data and check atmark state */
+    /* Receive normal data */
     n_recvd = do_synchronous_recv ( mem->sock[0].s, mem->sock[0].buf, n_expected, par->buflen );
     ok ( n_recvd == n_expected,
-         "simple_server (%x): received less data than expected: %d of %d\n", id, n_recvd, n_expected );
+         "oob_server (%x): received less data than expected: %d of %d\n", id, n_recvd, n_expected );
     pos = test_buffer ( mem->sock[0].buf, gen->chunk_size, gen->n_chunks );
-    ok ( pos == -1, "simple_server (%x): test pattern error: %d\n", id, pos);
+    ok ( pos == -1, "oob_server (%x): test pattern error: %d\n", id, pos);
 
+    /* Echo data back */
+    n_sent = do_synchronous_send ( mem->sock[0].s, mem->sock[0].buf, n_expected, par->buflen, 0 );
+    ok ( n_sent == n_expected,
+         "oob_server (%x): sent less data than expected: %d of %d\n", id, n_sent, n_expected );
+
+    /* check atmark state */
     ioctlsocket ( mem->sock[0].s, SIOCATMARK, &atmark );
     ok ( atmark == 1, "oob_server (%x): unexpectedly at the OOB mark: %i\n", id, atmark );
 
@@ -795,7 +791,7 @@ static VOID WINAPI simple_client ( client_params *par )
     trace ( "simple_client (%x) connected\n", id );
 
     /* send data to server */
-    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, par->buflen );
+    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, par->buflen, 0 );
     ok ( n_sent == n_expected,
          "simple_client (%x): sent less data than expected: %d of %d\n", id, n_sent, n_expected );
 
@@ -824,7 +820,7 @@ static VOID WINAPI oob_client ( client_params *par )
 {
     test_params *gen = par->general;
     client_memory *mem;
-    int n_sent, n_expected = gen->n_chunks * gen->chunk_size, id;
+    int pos, n_sent, n_recvd, n_expected = gen->n_chunks * gen->chunk_size, id;
 
     id = GetCurrentThreadId();
     trace ( "oob_client (%x): starting\n", id );
@@ -845,12 +841,19 @@ static VOID WINAPI oob_client ( client_params *par )
     trace ( "oob_client (%x) connected\n", id );
 
     /* send data to server */
-    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, par->buflen );
+    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, par->buflen, 0 );
     ok ( n_sent == n_expected,
          "oob_client (%x): sent less data than expected: %d of %d\n", id, n_sent, n_expected );
 
+    /* Receive data echoed back & check it */
+    n_recvd = do_synchronous_recv ( mem->s, mem->recv_buf, n_expected, par->buflen );
+    ok ( n_recvd == n_expected,
+         "simple_client (%x): received less data than expected: %d of %d\n", id, n_recvd, n_expected );
+    pos = test_buffer ( mem->recv_buf, gen->chunk_size, gen->n_chunks );
+    ok ( pos == -1, "simple_client (%x): test pattern error: %d\n", id, pos);
+
     /* send out-of-band data to server */
-    n_sent = do_oob_send ( mem->s, mem->send_buf, n_expected, par->buflen );
+    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, par->buflen, MSG_OOB );
     ok ( n_sent == n_expected,
          "oob_client (%x): sent less data than expected: %d of %d\n", id, n_sent, n_expected );
 
@@ -893,7 +896,7 @@ static VOID WINAPI simple_mixed_client ( client_params *par )
     trace ( "simple_client (%x) connected\n", id );
 
     /* send data to server */
-    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, par->buflen );
+    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, par->buflen, 0 );
     ok ( n_sent == n_expected,
          "simple_client (%x): sent less data than expected: %d of %d\n", id, n_sent, n_expected );
 
@@ -1854,7 +1857,8 @@ static DWORD WINAPI do_getservbyname( void *param )
     int i, j;
     struct servent *pserv[2];
 
-    ok ( WaitForSingleObject ( *starttest, TEST_TIMEOUT * 1000 ) != WAIT_TIMEOUT, "test_getservbyname: timeout waiting for start signal\n");
+    ok ( WaitForSingleObject ( *starttest, TEST_TIMEOUT * 1000 ) != WAIT_TIMEOUT,
+         "test_getservbyname: timeout waiting for start signal\n" );
 
     /* ensure that necessary buffer resizes are completed */
     for ( j = 0; j < 2; j++) {
@@ -1864,14 +1868,19 @@ static DWORD WINAPI do_getservbyname( void *param )
     for ( i = 0; i < NUM_QUERIES / 2; i++ ) {
         for ( j = 0; j < 2; j++ ) {
             pserv[j] = getservbyname ( serv[j].name, serv[j].proto );
-            ok ( pserv[j] != NULL, "getservbyname could not retrieve information for %s: %d\n", serv[j].name, WSAGetLastError() );
+            ok ( pserv[j] != NULL || broken(pserv[j] == NULL) /* win8, fixed in win81 */,
+                 "getservbyname could not retrieve information for %s: %d\n", serv[j].name, WSAGetLastError() );
             if ( !pserv[j] ) continue;
-            ok ( pserv[j]->s_port == htons(serv[j].port), "getservbyname returned the wrong port for %s: %d\n", serv[j].name, ntohs(pserv[j]->s_port) );
-            ok ( !strcmp ( pserv[j]->s_proto, serv[j].proto ), "getservbyname returned the wrong protocol for %s: %s\n", serv[j].name, pserv[j]->s_proto );
-            ok ( !strcmp ( pserv[j]->s_name, serv[j].name ), "getservbyname returned the wrong name for %s: %s\n", serv[j].name, pserv[j]->s_name );
+            ok ( pserv[j]->s_port == htons(serv[j].port),
+                 "getservbyname returned the wrong port for %s: %d\n", serv[j].name, ntohs(pserv[j]->s_port) );
+            ok ( !strcmp ( pserv[j]->s_proto, serv[j].proto ),
+                 "getservbyname returned the wrong protocol for %s: %s\n", serv[j].name, pserv[j]->s_proto );
+            ok ( !strcmp ( pserv[j]->s_name, serv[j].name ),
+                 "getservbyname returned the wrong name for %s: %s\n", serv[j].name, pserv[j]->s_name );
         }
 
-        ok ( pserv[0] == pserv[1], "getservbyname: winsock resized servent buffer when not necessary\n" );
+        ok ( pserv[0] == pserv[1] || broken(pserv[0] != pserv[1]) /* win8, fixed in win81 */,
+             "getservbyname: winsock resized servent buffer when not necessary\n" );
     }
 
     return 0;
@@ -5509,11 +5518,21 @@ static void test_GetAddrInfoW(void)
 
     result = (ADDRINFOW *)0xdeadbeef;
     ret = pGetAddrInfoW(NULL, NULL, NULL, &result);
+    if(ret == 0)
+    {
+        skip("nxdomain returned success. Broken ISP redirects?\n");
+        return;
+    }
     ok(ret == WSAHOST_NOT_FOUND, "got %d expected WSAHOST_NOT_FOUND\n", ret);
     ok(result == NULL, "got %p\n", result);
 
     result = (ADDRINFOW *)0xdeadbeef;
     ret = pGetAddrInfoW(nxdomain, NULL, NULL, &result);
+    if(ret == 0)
+    {
+        skip("nxdomain returned success. Broken ISP redirects?\n");
+        return;
+    }
     ok(ret == WSAHOST_NOT_FOUND, "got %d expected WSAHOST_NOT_FOUND\n", ret);
     ok(result == NULL, "got %p\n", result);
 
@@ -5650,6 +5669,11 @@ static void test_getaddrinfo(void)
 
     result = (ADDRINFOA *)0xdeadbeef;
     ret = pgetaddrinfo("nxdomain.codeweavers.com", NULL, NULL, &result);
+    if(ret == 0)
+    {
+        skip("nxdomain returned success. Broken ISP redirects?\n");
+        return;
+    }
     ok(ret == WSAHOST_NOT_FOUND, "got %d expected WSAHOST_NOT_FOUND\n", ret);
     ok(result == NULL, "got %p\n", result);
 
@@ -7366,13 +7390,17 @@ static void test_completion_port(void)
     ok(bret == FALSE, "failed to get completion status %u\n", bret);
     todo_wine ok(GetLastError() == ERROR_NETNAME_DELETED ||
                  GetLastError() == ERROR_OPERATION_ABORTED ||
-                 GetLastError() == ERROR_CONNECTION_ABORTED, "Last error was %d\n", GetLastError());
+                 GetLastError() == ERROR_CONNECTION_ABORTED ||
+                 GetLastError() == ERROR_PIPE_NOT_CONNECTED /* win 2000 */,
+                 "Last error was %d\n", GetLastError());
     ok(key == 125, "Key is %lu\n", key);
     ok(num_bytes == 0, "Number of bytes transferred is %u\n", num_bytes);
     ok(olp == &ov, "Overlapped structure is at %p\n", olp);
     todo_wine ok(olp && (olp->Internal == (ULONG)STATUS_LOCAL_DISCONNECT ||
                          olp->Internal == (ULONG)STATUS_CANCELLED ||
-                         olp->Internal == (ULONG)STATUS_CONNECTION_ABORTED), "Internal status is %lx\n", olp ? olp->Internal : 0);
+                         olp->Internal == (ULONG)STATUS_CONNECTION_ABORTED ||
+                         olp->Internal == (ULONG)STATUS_PIPE_DISCONNECTED /* win 2000 */),
+                         "Internal status is %lx\n", olp ? olp->Internal : 0);
 
     SetLastError(0xdeadbeef);
     key = 0xdeadbeef;

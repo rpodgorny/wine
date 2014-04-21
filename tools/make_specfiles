@@ -28,13 +28,7 @@ my @dll_groups =
 (
  [
   "msvcrt",
-  "msvcr100",
-  "msvcr110",
   "msvcirt",
-  "msvcr90",
-  "msvcr80",
-  "msvcr71",
-  "msvcr70",
   "msvcrt40",
   "msvcrt20",
   "msvcrtd",

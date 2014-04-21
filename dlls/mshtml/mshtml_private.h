@@ -488,6 +488,7 @@ struct HTMLDocument {
     IHTMLDocument4              IHTMLDocument4_iface;
     IHTMLDocument5              IHTMLDocument5_iface;
     IHTMLDocument6              IHTMLDocument6_iface;
+    IHTMLDocument7              IHTMLDocument7_iface;
     IPersistMoniker             IPersistMoniker_iface;
     IPersistFile                IPersistFile_iface;
     IPersistHistory             IPersistHistory_iface;
@@ -760,8 +761,6 @@ HRESULT create_history(HTMLInnerWindow*,OmHistory**) DECLSPEC_HIDDEN;
 
 HRESULT create_storage(IHTMLStorage**) DECLSPEC_HIDDEN;
 
-void HTMLDocument_HTMLDocument3_Init(HTMLDocument*) DECLSPEC_HIDDEN;
-void HTMLDocument_HTMLDocument5_Init(HTMLDocument*) DECLSPEC_HIDDEN;
 void HTMLDocument_Persist_Init(HTMLDocument*) DECLSPEC_HIDDEN;
 void HTMLDocument_OleCmd_Init(HTMLDocument*) DECLSPEC_HIDDEN;
 void HTMLDocument_OleObj_Init(HTMLDocument*) DECLSPEC_HIDDEN;
@@ -863,6 +862,10 @@ HRESULT create_element(HTMLDocumentNode*,const WCHAR*,HTMLElement**) DECLSPEC_HI
 
 HRESULT HTMLDOMTextNode_Create(HTMLDocumentNode*,nsIDOMNode*,HTMLDOMNode**) DECLSPEC_HIDDEN;
 
+BOOL variant_to_nscolor(const VARIANT *v, nsAString *nsstr) DECLSPEC_HIDDEN;
+HRESULT nscolor_to_str(LPCWSTR color, BSTR *ret) DECLSPEC_HIDDEN;
+
+
 struct HTMLAttributeCollection {
     DispatchEx dispex;
     IHTMLAttributeCollection IHTMLAttributeCollection_iface;
@@ -944,6 +947,7 @@ HTMLElement *unsafe_impl_from_IHTMLElement(IHTMLElement*) DECLSPEC_HIDDEN;
 HRESULT search_window_props(HTMLInnerWindow*,BSTR,DWORD,DISPID*) DECLSPEC_HIDDEN;
 HRESULT get_frame_by_name(HTMLOuterWindow*,const WCHAR*,BOOL,HTMLOuterWindow**) DECLSPEC_HIDDEN;
 HRESULT get_doc_elem_by_id(HTMLDocumentNode*,const WCHAR*,HTMLElement**) DECLSPEC_HIDDEN;
+HTMLOuterWindow *get_target_window(HTMLOuterWindow*,nsAString*,BOOL*) DECLSPEC_HIDDEN;
 
 HRESULT wrap_iface(IUnknown*,IUnknown*,IUnknown**) DECLSPEC_HIDDEN;
 

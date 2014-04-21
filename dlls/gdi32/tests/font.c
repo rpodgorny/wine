@@ -1190,8 +1190,6 @@ static void test_GetCharABCWidths(void)
          {TRUE, TRUE, FALSE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE}},
         {HANGEUL_CHARSET, 0x8141, 0xac02,
          {TRUE, TRUE, FALSE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE}},
-        {JOHAB_CHARSET, 0x8446, 0x3135,
-         {TRUE, TRUE, FALSE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE}},
         {GB2312_CHARSET, 0x8141, 0x4e04,
          {TRUE, TRUE, FALSE, FALSE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE}},
         {CHINESEBIG5_CHARSET, 0xa142, 0x3001,
@@ -2256,6 +2254,12 @@ static void test_SetTextJustification(void)
     GetClientRect( hwnd, &clientArea );
     hdc = GetDC( hwnd );
 
+    if (!is_font_installed("Times New Roman"))
+    {
+        skip("Times New Roman is not installed\n");
+        return;
+    }
+
     memset(&lf, 0, sizeof lf);
     lf.lfCharSet = ANSI_CHARSET;
     lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
@@ -2957,7 +2961,7 @@ static INT CALLBACK enum_multi_charset_font_proc(const LOGFONTA *lf, const TEXTM
 
     if (TranslateCharsetInfo(ULongToPtr(target->lfCharSet), &csi, TCI_SRCCHARSET)) {
         fs = ntm->ntmFontSig.fsCsb[0] & valid_bits;
-        if ((fs & csi.fs.fsCsb[0]) && (fs & ~csi.fs.fsCsb[0])) {
+        if ((fs & csi.fs.fsCsb[0]) && (fs & ~csi.fs.fsCsb[0]) && (fs & FS_LATIN1)) {
             *target = *lf;
             return FALSE;
         }
@@ -2998,13 +3002,13 @@ static void test_EnumFontFamiliesEx_default_charset(void)
 {
     struct enum_font_data efd;
     LOGFONTA target, enum_font;
-    DWORD ret;
+    UINT acp;
     HDC hdc;
     CHARSETINFO csi;
 
-    ret = GetACP();
-    if (!TranslateCharsetInfo(ULongToPtr(ret), &csi, TCI_SRCCODEPAGE)) {
-        skip("TranslateCharsetInfo failed for code page %d.\n", ret);
+    acp = GetACP();
+    if (!TranslateCharsetInfo(ULongToPtr(acp), &csi, TCI_SRCCODEPAGE)) {
+        skip("TranslateCharsetInfo failed for code page %u.\n", acp);
         return;
     }
 
@@ -3017,6 +3021,10 @@ static void test_EnumFontFamiliesEx_default_charset(void)
     if (target.lfFaceName[0] == '\0') {
         skip("suitable font isn't found for charset %d.\n", enum_font.lfCharSet);
         return;
+    }
+    if (acp == 874 || acp == 1255 || acp == 1256) {
+        /* these codepage use complex script, expecting ANSI_CHARSET here. */
+        target.lfCharSet = ANSI_CHARSET;
     }
 
     efd.total = 0;
@@ -4127,7 +4135,6 @@ static void test_GetGlyphOutline(void)
         {ANSI_CHARSET, 0x30, 0x30},
         {SHIFTJIS_CHARSET, 0x82a0, 0x3042},
         {HANGEUL_CHARSET, 0x8141, 0xac02},
-        {JOHAB_CHARSET, 0x8446, 0x3135},
         {GB2312_CHARSET, 0x8141, 0x4e04},
         {CHINESEBIG5_CHARSET, 0xa142, 0x3001}
     };

@@ -25,7 +25,7 @@
 #include "d3dx9tex.h"
 #include "resources.h"
 
-static int has_2d_dxt5, has_cube_dxt5;
+static int has_2d_dxt3, has_2d_dxt5, has_cube_dxt5;
 
 /* 2x2 16-bit dds, no mipmaps */
 static const unsigned char dds_16bit[] = {
@@ -304,14 +304,14 @@ static void test_D3DXCheckTextureRequirements(IDirect3DDevice9 *device)
     if (SUCCEEDED(IDirect3D9_CheckDeviceFormat(d3d, params.AdapterOrdinal, params.DeviceType,
                                                mode.Format, 0, D3DRTYPE_TEXTURE, D3DFMT_R3G3B2)))
         expected = D3DFMT_R3G3B2;
+    else if (SUCCEEDED(IDirect3D9_CheckDeviceFormat(d3d, params.AdapterOrdinal, params.DeviceType,
+                                                    mode.Format, 0, D3DRTYPE_TEXTURE, D3DFMT_X4R4G4B4)))
+        expected = D3DFMT_X4R4G4B4;
+    else if (SUCCEEDED(IDirect3D9_CheckDeviceFormat(d3d, params.AdapterOrdinal, params.DeviceType,
+                                                    mode.Format, 0, D3DRTYPE_TEXTURE, D3DFMT_X1R5G5B5)))
+        expected = D3DFMT_X1R5G5B5;
     else
-    {
-        if (SUCCEEDED(IDirect3D9_CheckDeviceFormat(d3d, params.AdapterOrdinal, params.DeviceType,
-                                                   mode.Format, 0, D3DRTYPE_TEXTURE, D3DFMT_X4R4G4B4)))
-            expected = D3DFMT_X4R4G4B4;
-        else
-            expected = D3DFMT_X1R5G5B5;
-    }
+        expected = D3DFMT_R5G6B5;
 
     format = D3DFMT_R3G3B2;
     hr = D3DXCheckTextureRequirements(device, NULL, NULL, NULL, 0, &format, D3DPOOL_DEFAULT);
@@ -341,15 +341,22 @@ static void test_D3DXCheckTextureRequirements(IDirect3DDevice9 *device)
     ok(format == expected, "Returned format %u, expected %u\n", format, expected);
 
     /* Block-based texture formats and size < block size. */
-    format = D3DFMT_DXT1;
-    width = 2; height = 2;
-    mipmaps = 1;
-    hr = D3DXCheckTextureRequirements(device, &width, &height, &mipmaps, 0, &format, D3DPOOL_DEFAULT);
-    ok(hr == D3D_OK, "D3DXCheckTextureRequirements returned %#x, expected %#x\n", hr, D3D_OK);
-    ok(width == 4, "Returned width %d, expected %d\n", width, 4);
-    ok(height == 4, "Returned height %d, expected %d\n", height, 4);
-    ok(mipmaps == 1, "Returned mipmaps %d, expected %d\n", mipmaps, 1);
-    ok(format == D3DFMT_DXT1, "Returned format %u, expected %u\n", format, D3DFMT_DXT1);
+    if (has_2d_dxt5)
+    {
+        format = D3DFMT_DXT5;
+        width = 2; height = 2;
+        mipmaps = 1;
+        hr = D3DXCheckTextureRequirements(device, &width, &height, &mipmaps, 0, &format, D3DPOOL_DEFAULT);
+        ok(hr == D3D_OK, "D3DXCheckTextureRequirements returned %#x, expected %#x\n", hr, D3D_OK);
+        ok(width == 4, "Returned width %d, expected %d\n", width, 4);
+        ok(height == 4, "Returned height %d, expected %d\n", height, 4);
+        ok(mipmaps == 1, "Returned mipmaps %d, expected %d\n", mipmaps, 1);
+        ok(format == D3DFMT_DXT5, "Returned format %u, expected %u\n", format, D3DFMT_DXT5);
+    }
+    else
+    {
+        skip("D3DFMT_DXT5 textures are not supported, skipping a test.\n");
+    }
 
     IDirect3D9_Release(d3d);
 }
@@ -1433,6 +1440,7 @@ static void test_D3DXCreateTextureFromFileInMemory(IDirect3DDevice9 *device)
     D3DSURFACE_DESC desc;
     D3DLOCKED_RECT lock_rect;
     int i;
+    DWORD level_count;
 
     hr = D3DXCreateTextureFromFileInMemory(device, dds_16bit, sizeof(dds_16bit), &texture);
     ok(hr == D3D_OK, "D3DXCreateTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
@@ -1464,11 +1472,45 @@ static void test_D3DXCreateTextureFromFileInMemory(IDirect3DDevice9 *device)
         if (SUCCEEDED(hr))
         {
             for (i = 0; i < 16; i++)
-                ok(((BYTE*)lock_rect.pBits)[i] == dds_cube_map[128+i], "Byte at index %u is 0x%02x, expected 0x%02x\n", i, ((BYTE*)lock_rect.pBits)[i], dds_cube_map[144+i]);
+                ok(((BYTE *)lock_rect.pBits)[i] == dds_cube_map[128 + i],
+                        "Byte at index %u is 0x%02x, expected 0x%02x.\n",
+                        i, ((BYTE *)lock_rect.pBits)[i], dds_cube_map[128 + i]);
             IDirect3DTexture9_UnlockRect(texture, 0);
         }
         IDirect3DTexture9_Release(texture);
 
+    }
+
+    /* Volume textures work too. */
+    hr = D3DXCreateTextureFromFileInMemory(device, dds_volume_map, sizeof(dds_volume_map), &texture);
+    if (has_2d_dxt3)
+        ok(hr == D3D_OK, "D3DXCreateTextureFromFileInMemory returned %#x, expected %#x.\n", hr, D3D_OK);
+    else
+        todo_wine ok(hr == D3D_OK, "D3DXCreateTextureFromFileInMemory returned %#x, expected %#x.\n", hr, D3D_OK);
+    if (SUCCEEDED(hr))
+    {
+        type = IDirect3DTexture9_GetType(texture);
+        ok(type == D3DRTYPE_TEXTURE, "IDirect3DTexture9_GetType returned %u, expected %u.\n", type, D3DRTYPE_TEXTURE);
+        level_count = IDirect3DBaseTexture9_GetLevelCount((IDirect3DBaseTexture9 *)texture);
+        todo_wine ok(level_count == 3, "Texture has %u mip levels, 3 expected.\n", level_count);
+        hr = IDirect3DTexture9_GetLevelDesc(texture, 0, &desc);
+        ok(hr == D3D_OK, "IDirect3DTexture9_GetLevelDesc returned %#x, expected %#x.\n", hr, D3D_OK);
+        ok(desc.Width == 4, "Width is %u, expected 4.\n", desc.Width);
+        ok(desc.Height == 4, "Height is %u, expected 4.\n", desc.Height);
+
+        hr = IDirect3DTexture9_LockRect(texture, 0, &lock_rect, NULL, D3DLOCK_READONLY);
+        ok(hr == D3D_OK, "IDirect3DTexture9_LockRect returned %#x, expected %#x.\n", hr, D3D_OK);
+        if (SUCCEEDED(hr))
+        {
+            for (i = 0; i < 16; ++i)
+                ok(((BYTE *)lock_rect.pBits)[i] == dds_volume_map[128 + i],
+                        "Byte at index %u is 0x%02x, expected 0x%02x.\n",
+                        i, ((BYTE *)lock_rect.pBits)[i], dds_volume_map[128 + i]);
+            IDirect3DTexture9_UnlockRect(texture, 0);
+        }
+        /* The lower texture levels are apparently generated by filtering the level 0 surface
+         * I.e. following levels from the file are ignored. */
+        IDirect3DTexture9_Release(texture);
     }
 }
 
@@ -1476,6 +1518,9 @@ static void test_D3DXCreateTextureFromFileInMemoryEx(IDirect3DDevice9 *device)
 {
     HRESULT hr;
     IDirect3DTexture9 *texture;
+    unsigned int miplevels;
+    IDirect3DSurface9 *surface;
+    D3DSURFACE_DESC desc;
 
     hr = D3DXCreateTextureFromFileInMemoryEx(device, dds_16bit, sizeof(dds_16bit), D3DX_DEFAULT, D3DX_DEFAULT, D3DX_DEFAULT,
         0, D3DFMT_UNKNOWN, D3DPOOL_DEFAULT, D3DX_DEFAULT, D3DX_DEFAULT, 0, NULL, NULL, &texture);
@@ -1486,6 +1531,22 @@ static void test_D3DXCreateTextureFromFileInMemoryEx(IDirect3DDevice9 *device)
         D3DUSAGE_DYNAMIC, D3DFMT_UNKNOWN, D3DPOOL_DEFAULT, D3DX_DEFAULT, D3DX_DEFAULT, 0, NULL, NULL, &texture);
     ok(hr == D3D_OK, "D3DXCreateTextureFromFileInMemoryEx returned %#x, expected %#x\n", hr, D3D_OK);
     if (SUCCEEDED(hr)) IDirect3DTexture9_Release(texture);
+
+    hr = D3DXCreateTextureFromFileInMemoryEx(device, dds_24bit, sizeof(dds_24bit), D3DX_DEFAULT,
+            D3DX_DEFAULT, D3DX_DEFAULT, D3DUSAGE_DYNAMIC, D3DFMT_UNKNOWN, D3DPOOL_DEFAULT,
+            D3DX_DEFAULT, D3DX_SKIP_DDS_MIP_LEVELS(1, D3DX_FILTER_POINT), 0, NULL, NULL, &texture);
+    ok(hr == D3D_OK, "D3DXCreateTextureFromFileInMemoryEx returned %#x, expected %#x\n", hr, D3D_OK);
+    if (SUCCEEDED(hr))
+    {
+        miplevels = IDirect3DTexture9_GetLevelCount(texture);
+        ok(miplevels == 1, "Got miplevels %u, expected %u\n", miplevels, 1);
+        IDirect3DTexture9_GetSurfaceLevel(texture, 0, &surface);
+        IDirect3DSurface9_GetDesc(surface, &desc);
+        ok(desc.Width == 1 && desc.Height == 1,
+                "Surface dimensions are %ux%u, expected 1x1.\n", desc.Width, desc.Height);
+        IDirect3DSurface9_Release(surface);
+        IDirect3DTexture9_Release(texture);
+    }
 
     if (!is_autogenmipmap_supported(device, D3DRTYPE_TEXTURE))
     {
@@ -1576,7 +1637,10 @@ static void test_D3DXCreateVolumeTextureFromFileInMemory(IDirect3DDevice9 *devic
     ok(hr == D3DERR_INVALIDCALL, "D3DXCreateVolumeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
 
     hr = D3DXCreateVolumeTextureFromFileInMemory(device, dds_volume_map, sizeof(dds_volume_map), &volume_texture);
-    ok(hr == D3D_OK, "D3DXCreateVolumeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
+    if (has_2d_dxt3)
+        ok(hr == D3D_OK, "D3DXCreateVolumeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
+    else
+        todo_wine ok(hr == D3D_OK, "D3DXCreateVolumeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
     if (SUCCEEDED(hr))
     {
         levelcount = IDirect3DVolumeTexture9_GetLevelCount(volume_texture);
@@ -1821,7 +1885,9 @@ START_TEST(texture)
         return;
     }
 
-    /* Check whether DXT5 textures are supported */
+    /* Check whether DXTn textures are supported. */
+    has_2d_dxt3 = SUCCEEDED(IDirect3D9_CheckDeviceFormat(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_X8R8G8B8, 0, D3DRTYPE_TEXTURE, D3DFMT_DXT3));
     hr = IDirect3D9_CheckDeviceFormat(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
             D3DFMT_X8R8G8B8, 0, D3DRTYPE_TEXTURE, D3DFMT_DXT5);
     has_2d_dxt5 = SUCCEEDED(hr);

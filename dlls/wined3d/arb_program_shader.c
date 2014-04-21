@@ -9,7 +9,7 @@
  * Copyright 2006 Ivan Gyurdiev
  * Copyright 2006 Jason Green
  * Copyright 2006 Henri Verbeet
- * Copyright 2007-2011, 2013 Stefan Dösinger for CodeWeavers
+ * Copyright 2007-2011, 2013-2014 Stefan Dösinger for CodeWeavers
  * Copyright 2009 Henri Verbeet for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
@@ -1792,6 +1792,11 @@ static void shader_hw_map2gl(const struct wined3d_shader_instruction *ins)
 
 static void shader_hw_nop(const struct wined3d_shader_instruction *ins) {}
 
+static DWORD shader_arb_select_component(DWORD swizzle, DWORD component)
+{
+    return ((swizzle >> 2 * component) & 0x3) * 0x55;
+}
+
 static void shader_hw_mov(const struct wined3d_shader_instruction *ins)
 {
     const struct wined3d_shader *shader = ins->ctx->shader;
@@ -1862,7 +1867,7 @@ static void shader_hw_mov(const struct wined3d_shader_instruction *ins)
              * with more than one component. Thus replicate the first source argument over all
              * 4 components. For example, .xyzw -> .x (or better: .xxxx), .zwxy -> .z, etc) */
             struct wined3d_shader_src_param tmp_src = ins->src[0];
-            tmp_src.swizzle = (tmp_src.swizzle & 0x3) * 0x55;
+            tmp_src.swizzle = shader_arb_select_component(tmp_src.swizzle, 0);
             shader_arb_get_src_param(ins, &tmp_src, 0, src0_param);
             shader_addline(buffer, "ARL A0.x, %s;\n", src0_param);
         }
@@ -2472,30 +2477,36 @@ static void shader_hw_mnxn(const struct wined3d_shader_instruction *ins)
     }
 }
 
-static void shader_hw_rcp(const struct wined3d_shader_instruction *ins)
+static DWORD abs_modifier(DWORD mod, BOOL *need_abs)
 {
-    struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
+    *need_abs = FALSE;
 
-    char dst[50];
-    char src[50];
-
-    shader_arb_get_dst_param(ins, &ins->dst[0], dst); /* Destination */
-    shader_arb_get_src_param(ins, &ins->src[0], 0, src);
-    if (ins->src[0].swizzle == WINED3DSP_NOSWIZZLE)
+    switch(mod)
     {
-        /* Dx sdk says .x is used if no swizzle is given, but our test shows that
-         * .w is used
-         */
-        strcat(src, ".w");
+        case WINED3DSPSM_NONE:      return WINED3DSPSM_ABS;
+        case WINED3DSPSM_NEG:       return WINED3DSPSM_ABS;
+        case WINED3DSPSM_BIAS:      *need_abs = TRUE; return WINED3DSPSM_BIAS;
+        case WINED3DSPSM_BIASNEG:   *need_abs = TRUE; return WINED3DSPSM_BIASNEG;
+        case WINED3DSPSM_SIGN:      *need_abs = TRUE; return WINED3DSPSM_SIGN;
+        case WINED3DSPSM_SIGNNEG:   *need_abs = TRUE; return WINED3DSPSM_SIGNNEG;
+        case WINED3DSPSM_COMP:      *need_abs = TRUE; return WINED3DSPSM_COMP;
+        case WINED3DSPSM_X2:        *need_abs = TRUE; return WINED3DSPSM_X2;
+        case WINED3DSPSM_X2NEG:     *need_abs = TRUE; return WINED3DSPSM_X2NEG;
+        case WINED3DSPSM_DZ:        *need_abs = TRUE; return WINED3DSPSM_DZ;
+        case WINED3DSPSM_DW:        *need_abs = TRUE; return WINED3DSPSM_DW;
+        case WINED3DSPSM_ABS:       return WINED3DSPSM_ABS;
+        case WINED3DSPSM_ABSNEG:    return WINED3DSPSM_ABS;
     }
-
-    shader_addline(buffer, "RCP%s %s, %s;\n", shader_arb_get_modifier(ins), dst, src);
+    FIXME("Unknown modifier %u\n", mod);
+    return mod;
 }
 
 static void shader_hw_scalar_op(const struct wined3d_shader_instruction *ins)
 {
     struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
     const char *instruction;
+    struct wined3d_shader_src_param src0_copy = ins->src[0];
+    BOOL need_abs = FALSE;
 
     char dst[50];
     char src[50];
@@ -2504,24 +2515,46 @@ static void shader_hw_scalar_op(const struct wined3d_shader_instruction *ins)
     {
         case WINED3DSIH_RSQ:  instruction = "RSQ"; break;
         case WINED3DSIH_RCP:  instruction = "RCP"; break;
-        case WINED3DSIH_EXP:  instruction = "EX2"; break;
-        case WINED3DSIH_EXPP: instruction = "EXP"; break;
+        case WINED3DSIH_EXPP:
+            if (ins->ctx->reg_maps->shader_version.major < 2)
+            {
+                instruction = "EXP";
+                break;
+            }
+            /* Drop through. */
+        case WINED3DSIH_EXP:
+            instruction = "EX2";
+            break;
+        case WINED3DSIH_LOG:
+        case WINED3DSIH_LOGP:
+            /* The precision requirements suggest that LOGP matches ARBvp's LOG
+             * instruction, but notice that the output of those instructions is
+             * different. */
+            src0_copy.modifiers = abs_modifier(src0_copy.modifiers, &need_abs);
+            instruction = "LG2";
+            break;
         default: instruction = "";
             FIXME("Unhandled opcode %#x\n", ins->handler_idx);
             break;
     }
 
+    /* Dx sdk says .x is used if no swizzle is given, but our test shows that
+     * .w is used. */
+    src0_copy.swizzle = shader_arb_select_component(src0_copy.swizzle, 3);
+
     shader_arb_get_dst_param(ins, &ins->dst[0], dst); /* Destination */
-    shader_arb_get_src_param(ins, &ins->src[0], 0, src);
-    if (ins->src[0].swizzle == WINED3DSP_NOSWIZZLE)
+    shader_arb_get_src_param(ins, &src0_copy, 0, src);
+
+    if(need_abs)
     {
-        /* Dx sdk says .x is used if no swizzle is given, but our test shows that
-         * .w is used
-         */
-        strcat(src, ".w");
+        shader_addline(buffer, "ABS TA.w, %s;\n", src);
+        shader_addline(buffer, "%s%s %s, TA.w;\n", instruction, shader_arb_get_modifier(ins), dst);
+    }
+    else
+    {
+        shader_addline(buffer, "%s%s %s, %s;\n", instruction, shader_arb_get_modifier(ins), dst, src);
     }
 
-    shader_addline(buffer, "%s%s %s, %s;\n", instruction, shader_arb_get_modifier(ins), dst, src);
 }
 
 static void shader_hw_nrm(const struct wined3d_shader_instruction *ins)
@@ -2759,64 +2792,6 @@ static void shader_hw_dsy(const struct wined3d_shader_instruction *ins)
 
     shader_addline(buffer, "DDY %s, %s;\n", dst, src);
     shader_addline(buffer, "MUL%s %s, %s, ycorrection.y;\n", shader_arb_get_modifier(ins), dst, dst_name);
-}
-
-static DWORD abs_modifier(DWORD mod, BOOL *need_abs)
-{
-    *need_abs = FALSE;
-
-    switch(mod)
-    {
-        case WINED3DSPSM_NONE:      return WINED3DSPSM_ABS;
-        case WINED3DSPSM_NEG:       return WINED3DSPSM_ABS;
-        case WINED3DSPSM_BIAS:      *need_abs = TRUE; return WINED3DSPSM_BIAS;
-        case WINED3DSPSM_BIASNEG:   *need_abs = TRUE; return WINED3DSPSM_BIASNEG;
-        case WINED3DSPSM_SIGN:      *need_abs = TRUE; return WINED3DSPSM_SIGN;
-        case WINED3DSPSM_SIGNNEG:   *need_abs = TRUE; return WINED3DSPSM_SIGNNEG;
-        case WINED3DSPSM_COMP:      *need_abs = TRUE; return WINED3DSPSM_COMP;
-        case WINED3DSPSM_X2:        *need_abs = TRUE; return WINED3DSPSM_X2;
-        case WINED3DSPSM_X2NEG:     *need_abs = TRUE; return WINED3DSPSM_X2NEG;
-        case WINED3DSPSM_DZ:        *need_abs = TRUE; return WINED3DSPSM_DZ;
-        case WINED3DSPSM_DW:        *need_abs = TRUE; return WINED3DSPSM_DW;
-        case WINED3DSPSM_ABS:       return WINED3DSPSM_ABS;
-        case WINED3DSPSM_ABSNEG:    return WINED3DSPSM_ABS;
-    }
-    FIXME("Unknown modifier %u\n", mod);
-    return mod;
-}
-
-static void shader_hw_log(const struct wined3d_shader_instruction *ins)
-{
-    struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
-    char src0[50], dst[50];
-    struct wined3d_shader_src_param src0_copy = ins->src[0];
-    BOOL need_abs = FALSE;
-    const char *instr;
-
-    switch(ins->handler_idx)
-    {
-        case WINED3DSIH_LOG:  instr = "LG2"; break;
-        case WINED3DSIH_LOGP: instr = "LOG"; break;
-        default:
-            ERR("Unexpected instruction %d\n", ins->handler_idx);
-            return;
-    }
-
-    /* LOG and LOGP operate on the absolute value of the input */
-    src0_copy.modifiers = abs_modifier(src0_copy.modifiers, &need_abs);
-
-    shader_arb_get_dst_param(ins, &ins->dst[0], dst);
-    shader_arb_get_src_param(ins, &src0_copy, 0, src0);
-
-    if(need_abs)
-    {
-        shader_addline(buffer, "ABS TA, %s;\n", src0);
-        shader_addline(buffer, "%s%s %s, TA;\n", instr, shader_arb_get_modifier(ins), dst);
-    }
-    else
-    {
-        shader_addline(buffer, "%s%s %s, %s;\n", instr, shader_arb_get_modifier(ins), dst, src0);
-    }
 }
 
 static void shader_hw_pow(const struct wined3d_shader_instruction *ins)
@@ -5052,8 +5027,12 @@ static BOOL shader_arb_allocate_context_data(struct wined3d_context *context)
 
 static void shader_arb_free_context_data(struct wined3d_context *context)
 {
-    struct shader_arb_priv *priv = context->swapchain->device->shader_priv;
+    struct shader_arb_priv *priv;
 
+    if (!context->swapchain)
+        return;
+
+    priv = context->swapchain->device->shader_priv;
     if (priv->last_context == context)
         priv->last_context = NULL;
 }
@@ -5239,8 +5218,8 @@ static const SHADER_HANDLER shader_arb_instruction_handler_table[WINED3DSIH_TABL
     /* WINED3DSIH_LABEL                 */ shader_hw_label,
     /* WINED3DSIH_LD                    */ NULL,
     /* WINED3DSIH_LIT                   */ shader_hw_map2gl,
-    /* WINED3DSIH_LOG                   */ shader_hw_log,
-    /* WINED3DSIH_LOGP                  */ shader_hw_log,
+    /* WINED3DSIH_LOG                   */ shader_hw_scalar_op,
+    /* WINED3DSIH_LOGP                  */ shader_hw_scalar_op,
     /* WINED3DSIH_LOOP                  */ shader_hw_loop,
     /* WINED3DSIH_LRP                   */ shader_hw_lrp,
     /* WINED3DSIH_LT                    */ NULL,
@@ -5260,7 +5239,7 @@ static const SHADER_HANDLER shader_arb_instruction_handler_table[WINED3DSIH_TABL
     /* WINED3DSIH_NRM                   */ shader_hw_nrm,
     /* WINED3DSIH_PHASE                 */ shader_hw_nop,
     /* WINED3DSIH_POW                   */ shader_hw_pow,
-    /* WINED3DSIH_RCP                   */ shader_hw_rcp,
+    /* WINED3DSIH_RCP                   */ shader_hw_scalar_op,
     /* WINED3DSIH_REP                   */ shader_hw_rep,
     /* WINED3DSIH_RET                   */ shader_hw_ret,
     /* WINED3DSIH_ROUND_NI              */ NULL,

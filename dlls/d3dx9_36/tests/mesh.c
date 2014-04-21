@@ -2424,6 +2424,85 @@ cleanup:
     if (wnd) DestroyWindow(wnd);
 }
 
+static BOOL compute_box(struct mesh *mesh, float width, float height, float depth)
+{
+    unsigned int i, face;
+    static const D3DXVECTOR3 unit_box[] =
+    {
+        {-1.0f, -1.0f, -1.0f}, {-1.0f, -1.0f,  1.0f}, {-1.0f,  1.0f,  1.0f}, {-1.0f,  1.0f, -1.0f},
+        {-1.0f,  1.0f, -1.0f}, {-1.0f,  1.0f,  1.0f}, { 1.0f,  1.0f,  1.0f}, { 1.0f,  1.0f, -1.0f},
+        { 1.0f,  1.0f, -1.0f}, { 1.0f,  1.0f,  1.0f}, { 1.0f, -1.0f,  1.0f}, { 1.0f, -1.0f, -1.0f},
+        {-1.0f, -1.0f,  1.0f}, {-1.0f, -1.0f, -1.0f}, { 1.0f, -1.0f, -1.0f}, { 1.0f, -1.0f,  1.0f},
+        {-1.0f, -1.0f,  1.0f}, { 1.0f, -1.0f,  1.0f}, { 1.0f,  1.0f,  1.0f}, {-1.0f,  1.0f,  1.0f},
+        {-1.0f, -1.0f, -1.0f}, {-1.0f,  1.0f, -1.0f}, { 1.0f,  1.0f, -1.0f}, { 1.0f, -1.0f, -1.0f}
+    };
+    static const D3DXVECTOR3 normals[] =
+    {
+        {-1.0f,  0.0f, 0.0f}, { 0.0f, 1.0f, 0.0f}, { 1.0f, 0.0f,  0.0f},
+        { 0.0f, -1.0f, 0.0f}, { 0.0f, 0.0f, 1.0f}, { 0.0f, 0.0f, -1.0f}
+    };
+
+    if (!new_mesh(mesh, 24, 12))
+    {
+        return FALSE;
+    }
+
+    width /= 2.0f;
+    height /= 2.0f;
+    depth /= 2.0f;
+
+    for (i = 0; i < 24; i++)
+    {
+        mesh->vertices[i].position.x = width * unit_box[i].x;
+        mesh->vertices[i].position.y = height * unit_box[i].y;
+        mesh->vertices[i].position.z = depth * unit_box[i].z;
+        mesh->vertices[i].normal.x = normals[i / 4].x;
+        mesh->vertices[i].normal.y = normals[i / 4].y;
+        mesh->vertices[i].normal.z = normals[i / 4].z;
+    }
+
+    face = 0;
+    for (i = 0; i < 12; i++)
+    {
+        mesh->faces[i][0] = face++;
+        mesh->faces[i][1] = face++;
+        mesh->faces[i][2] = (i % 2) ? face - 4 : face;
+    }
+
+    return TRUE;
+}
+
+static void test_box(IDirect3DDevice9 *device, float width, float height, float depth)
+{
+    HRESULT hr;
+    ID3DXMesh *box;
+    struct mesh mesh;
+    char name[256];
+
+    hr = D3DXCreateBox(device, width, height, depth, &box, NULL);
+    ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK)\n", hr);
+    if (hr != D3D_OK)
+    {
+        skip("Couldn't create box\n");
+        return;
+    }
+
+    if (!compute_box(&mesh, width, height, depth))
+    {
+        skip("Couldn't create mesh\n");
+        box->lpVtbl->Release(box);
+        return;
+    }
+
+    mesh.fvf = D3DFVF_XYZ | D3DFVF_NORMAL;
+
+    sprintf(name, "box (%g, %g, %g)", width, height, depth);
+    compare_mesh(name, box, &mesh);
+
+    free_mesh(&mesh);
+
+    box->lpVtbl->Release(box);
+}
 static void D3DXCreateBoxTest(void)
 {
     HRESULT hr;
@@ -2482,23 +2561,23 @@ static void D3DXCreateBoxTest(void)
     }
 
     hr = D3DXCreateBox(device,2.0f,20.0f,4.9f,NULL, &ppBuffer);
-    todo_wine ok(hr==D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, received %#x\n", hr);
+    ok(hr==D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, received %#x\n", hr);
 
     hr = D3DXCreateBox(NULL,22.0f,20.0f,4.9f,&box, &ppBuffer);
-    todo_wine ok(hr==D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, received %#x\n", hr);
+    ok(hr==D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, received %#x\n", hr);
 
     hr = D3DXCreateBox(device,-2.0f,20.0f,4.9f,&box, &ppBuffer);
-    todo_wine ok(hr==D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, received %#x\n", hr);
+    ok(hr==D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, received %#x\n", hr);
 
     hr = D3DXCreateBox(device,22.0f,-20.0f,4.9f,&box, &ppBuffer);
-    todo_wine ok(hr==D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, received %#x\n", hr);
+    ok(hr==D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, received %#x\n", hr);
 
     hr = D3DXCreateBox(device,22.0f,20.0f,-4.9f,&box, &ppBuffer);
-    todo_wine ok(hr==D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, received %#x\n", hr);
+    ok(hr==D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, received %#x\n", hr);
 
     ppBuffer = NULL;
     hr = D3DXCreateBox(device,10.9f,20.0f,4.9f,&box, &ppBuffer);
-    todo_wine ok(hr==D3D_OK, "Expected D3D_OK, received %#x\n", hr);
+    ok(hr==D3D_OK, "Expected D3D_OK, received %#x\n", hr);
 
     if (FAILED(hr))
     {
@@ -2508,9 +2587,11 @@ static void D3DXCreateBoxTest(void)
 
     buffer = ID3DXBuffer_GetBufferPointer(ppBuffer);
     for(i=0; i<36; i++)
-        todo_wine ok(adjacency[i]==buffer[i], "expected adjacency %d: %#x, received %#x\n",i,adjacency[i], buffer[i]);
+        ok(adjacency[i]==buffer[i], "expected adjacency %d: %#x, received %#x\n",i,adjacency[i], buffer[i]);
 
     box->lpVtbl->Release(box);
+
+    test_box(device, 10.9f, 20.0f, 4.9f);
 
 end:
     IDirect3DDevice9_Release(device);
@@ -6368,11 +6449,6 @@ static void test_weld_vertices(void)
         D3DXVECTOR3 position;
         SHORT normal[4];
     };
-    struct vertex_color_float4
-    {
-        D3DXVECTOR3 position;
-        D3DXVECTOR4 color;
-    };
     struct vertex_texcoord_float16_2
     {
         D3DXVECTOR3 position;
@@ -6400,7 +6476,6 @@ static void test_weld_vertices(void)
     UINT vertex_size_color_ubyte4 = sizeof(struct vertex_color_ubyte4);
     UINT vertex_size_texcoord_short2 = sizeof(struct vertex_texcoord_short2);
     UINT vertex_size_normal_short4 = sizeof(struct vertex_normal_short4);
-    UINT vertex_size_color_float4 = sizeof(struct vertex_color_float4);
     UINT vertex_size_texcoord_float16_2 = sizeof(struct vertex_texcoord_float16_2);
     UINT vertex_size_texcoord_float16_4 = sizeof(struct vertex_texcoord_float16_4);
     UINT vertex_size_normal_udec3 = sizeof(struct vertex_normal_udec3);
@@ -6495,10 +6570,10 @@ static void test_weld_vertices(void)
         {0, 12, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 2},
         D3DDECL_END()
     };
-    D3DVERTEXELEMENT9 declaration_color2_float4[] =
+    D3DVERTEXELEMENT9 declaration_color1[] =
     {
         {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
-        {0, 12, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 2},
+        {0, 12, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 1},
         D3DDECL_END()
     };
     D3DVERTEXELEMENT9 declaration_texcoord_float16_2[] =
@@ -7362,34 +7437,38 @@ static void test_weld_vertices(void)
     const DWORD exp_face_remap26[] = {0, 1};
     const DWORD exp_vertex_remap26[] = {0, 1, 2, 3, 4, 5};
     const DWORD exp_new_num_vertices26 = ARRAY_SIZE(exp_vertices26);
-    /* Test 27. Weld color with usage index larger than 1. Check that the
-     * default epsilon of 1e-6f is used. */
-    D3DXVECTOR4 zero_float4 = {0.0f, 0.0f, 0.0f, 0.0f};
-    D3DXVECTOR4 almost_zero_float4 = {0.0f + FLT_EPSILON, 0.0f + FLT_EPSILON, 0.0f + FLT_EPSILON, 0.0f + FLT_EPSILON};
-    const struct vertex_color_float4 vertices27[] =
+    /* Test 27. Weld color with usage index 1 (specular). */
+    /* Previously this test used float color values and index > 1 but that case
+     * appears to be effectively unhandled in native so the test gave
+     * inconsistent results. */
+    const struct vertex_color vertices27[] =
     {
-        {{ 0.0f,  3.0f,  0.f}, zero_float4},
-        {{ 2.0f,  3.0f,  0.f}, zero_float4},
-        {{ 0.0f,  0.0f,  0.f}, zero_float4},
+        {{ 0.0f,  3.0f,  0.0f}, 0x00000000},
+        {{ 2.0f,  3.0f,  0.0f}, 0x10203040},
+        {{ 0.0f,  0.0f,  0.0f}, 0x50607080},
 
-        {{ 3.0f,  3.0f,  0.f}, almost_zero_float4},
-        {{ 3.0f,  0.0f,  0.f}, zero_float4},
-        {{ 1.0f,  0.0f,  0.f}, almost_zero_float4},
+        {{ 3.0f,  3.0f,  0.0f}, 0x11213141},
+        {{ 3.0f,  0.0f,  0.0f}, 0xffffffff},
+        {{ 1.0f,  0.0f,  0.0f}, 0x51617181},
     };
     const DWORD indices27[] = {0, 1, 2, 3, 4, 5};
     const DWORD attributes27[] = {0, 0};
     const UINT num_vertices27 = ARRAY_SIZE(vertices27);
     const UINT num_faces27 = ARRAY_SIZE(indices27) / VERTS_PER_FACE;
     DWORD flags27 = D3DXWELDEPSILONS_WELDPARTIALMATCHES;
-    const D3DXWELDEPSILONS epsilons27 = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, 0.0f};
-    const DWORD adjacency27[] = {-1, 1, -1, -1, -1, 0};
-    const struct vertex_color_float4 exp_vertices27[] =
+    const D3DXWELDEPSILONS epsilons27 =
     {
-        {{ 0.0f,  3.0f,  0.f}, zero_float4},
-        {{ 2.0f,  3.0f,  0.f}, zero_float4},
-        {{ 0.0f,  0.0f,  0.f}, zero_float4},
+        1.1f, 0.0f, 0.0f, 0.0f, 2.0f / 255.0f, 0.0f,
+        {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, 0.0f
+    };
+    const DWORD adjacency27[] = {-1, 1, -1, -1, -1, 0};
+    const struct vertex_color exp_vertices27[] =
+    {
+        {{ 0.0f,  3.0f,  0.0f}, 0x00000000},
+        {{ 2.0f,  3.0f,  0.0f}, 0x10203040},
+        {{ 0.0f,  0.0f,  0.0f}, 0x50607080},
 
-        {{ 3.0f,  0.0f,  0.f}, zero_float4},
+        {{ 3.0f,  0.0f,  0.0f}, 0xffffffff},
     };
     const DWORD exp_indices27[] = {0, 1, 2, 1, 3, 2};
     const DWORD exp_face_remap27[] = {0, 1};
@@ -7983,8 +8062,8 @@ static void test_weld_vertices(void)
             num_vertices27,
             num_faces27,
             options,
-            declaration_color2_float4,
-            vertex_size_color_float4,
+            declaration_color1,
+            vertex_size_color,
             flags27,
             &epsilons27,
             adjacency27,
@@ -8063,7 +8142,7 @@ static void test_weld_vertices(void)
             goto cleanup;
         }
         face_remap = HeapAlloc(GetProcessHeap(), 0, tc[i].num_faces * sizeof(*face_remap));
-        if (!adjacency_out)
+        if (!face_remap)
         {
             skip("Couldn't allocate face_remap array.\n");
             goto cleanup;

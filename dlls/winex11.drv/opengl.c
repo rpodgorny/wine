@@ -252,6 +252,7 @@ struct gl_drawable
     XVisualInfo                   *visual;       /* information about the GL visual */
     RECT                           rect;         /* drawable rect, relative to whole window drawable */
     int                            swap_interval;
+    BOOL                           refresh_swap_interval;
 };
 
 enum glx_swap_control_method
@@ -1185,6 +1186,43 @@ static inline void sync_context(struct wgl_context *context)
     }
 }
 
+static BOOL set_swap_interval(Drawable drawable, int interval)
+{
+    BOOL ret = TRUE;
+
+    switch (swap_control_method)
+    {
+    case GLX_SWAP_CONTROL_EXT:
+        X11DRV_expect_error(gdi_display, GLXErrorHandler, NULL);
+        pglXSwapIntervalEXT(gdi_display, drawable, interval);
+        XSync(gdi_display, False);
+        ret = !X11DRV_check_error();
+        break;
+
+    case GLX_SWAP_CONTROL_MESA:
+        ret = !pglXSwapIntervalMESA(interval);
+        break;
+
+    case GLX_SWAP_CONTROL_SGI:
+        /* wglSwapIntervalEXT considers an interval value of zero to mean that
+         * vsync should be disabled, but glXSwapIntervalSGI considers such a
+         * value to be an error. Just silently ignore the request for now.
+         */
+        if (!interval)
+            WARN("Request to disable vertical sync is not handled\n");
+        else
+            ret = !pglXSwapIntervalSGI(interval);
+        break;
+
+    case GLX_SWAP_CONTROL_NONE:
+        /* Unlikely to happen on modern GLX implementations */
+        WARN("Request to adjust swap interval is not handled\n");
+        break;
+    }
+
+    return ret;
+}
+
 static struct gl_drawable *get_gl_drawable( HWND hwnd, HDC hdc )
 {
     struct gl_drawable *gl;
@@ -1250,13 +1288,9 @@ static void free_gl_drawable( struct gl_drawable *gl )
 /***********************************************************************
  *              create_gl_drawable
  */
-static BOOL create_gl_drawable( HWND hwnd, HWND parent, struct gl_drawable *gl )
+static BOOL create_gl_drawable( HWND hwnd, struct gl_drawable *gl )
 {
     gl->drawable = 0;
-    /* Default GLX and WGL swap interval is 1, but in case of glXSwapIntervalSGI
-     * there is no way to query it, so we have to store it here.
-     */
-    gl->swap_interval = 1;
 
     if (GetAncestor( hwnd, GA_PARENT ) == GetDesktopWindow())  /* top-level window */
     {
@@ -1318,6 +1352,8 @@ static BOOL create_gl_drawable( HWND hwnd, HWND parent, struct gl_drawable *gl )
         }
     }
 
+    if (gl->drawable)
+        gl->refresh_swap_interval = TRUE;
     return gl->drawable != 0;
 }
 
@@ -1327,10 +1363,14 @@ static BOOL create_gl_drawable( HWND hwnd, HWND parent, struct gl_drawable *gl )
  */
 static BOOL set_win_format( HWND hwnd, const struct wgl_pixel_format *format )
 {
-    HWND parent = GetAncestor( hwnd, GA_PARENT );
     struct gl_drawable *gl, *prev;
 
     gl = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*gl) );
+    /* Default GLX and WGL swap interval is 1, but in case of glXSwapIntervalSGI
+     * there is no way to query it, so we have to store it here.
+     */
+    gl->swap_interval = 1;
+    gl->refresh_swap_interval = TRUE;
     gl->format = format;
     gl->visual = pglXGetVisualFromFBConfig( gdi_display, format->fbconfig );
     if (!gl->visual)
@@ -1343,7 +1383,7 @@ static BOOL set_win_format( HWND hwnd, const struct wgl_pixel_format *format )
     gl->rect.right  = min( max( 1, gl->rect.right ), 65535 );
     gl->rect.bottom = min( max( 1, gl->rect.bottom ), 65535 );
 
-    if (!create_gl_drawable( hwnd, parent, gl ))
+    if (!create_gl_drawable( hwnd, gl ))
     {
         XFree( gl->visual );
         HeapFree( GetProcessHeap(), 0, gl );
@@ -1356,7 +1396,10 @@ static BOOL set_win_format( HWND hwnd, const struct wgl_pixel_format *format )
 
     EnterCriticalSection( &context_section );
     if (!XFindContext( gdi_display, (XID)hwnd, gl_hwnd_context, (char **)&prev ))
+    {
+        gl->swap_interval = prev->swap_interval;
         free_gl_drawable( prev );
+    }
     XSaveContext( gdi_display, (XID)hwnd, gl_hwnd_context, (char *)gl );
     LeaveCriticalSection( &context_section );
 
@@ -1450,7 +1493,7 @@ void set_gl_drawable_parent( HWND hwnd, HWND parent )
         goto done;
     }
 
-    if (!create_gl_drawable( hwnd, parent, gl ))
+    if (!create_gl_drawable( hwnd, gl ))
     {
         XDeleteContext( gdi_display, (XID)hwnd, gl_hwnd_context );
         release_gl_drawable( gl );
@@ -2280,11 +2323,9 @@ static HDC X11DRV_wglGetPbufferDCARB( struct wgl_pbuffer *object )
     LeaveCriticalSection( &context_section );
 
     escape.code = X11DRV_SET_DRAWABLE;
-    escape.hwnd = 0;
     escape.drawable = object->drawable;
     escape.mode = IncludeInferiors;
     SetRect( &escape.dc_rect, 0, 0, object->width, object->height );
-    escape.fbconfig_id = object->fmt->fmt_id;
     ExtEscape( hdc, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
 
     TRACE( "(%p)->(%p)\n", object, hdc );
@@ -2958,36 +2999,8 @@ static BOOL X11DRV_wglSwapIntervalEXT(int interval)
         return FALSE;
     }
 
-    switch (swap_control_method)
-    {
-    case GLX_SWAP_CONTROL_EXT:
-        X11DRV_expect_error(gdi_display, GLXErrorHandler, NULL);
-        pglXSwapIntervalEXT(gdi_display, gl->drawable, interval);
-        XSync(gdi_display, False);
-        ret = !X11DRV_check_error();
-        break;
-
-    case GLX_SWAP_CONTROL_MESA:
-        ret = !pglXSwapIntervalMESA(interval);
-        break;
-
-    case GLX_SWAP_CONTROL_SGI:
-        /* wglSwapIntervalEXT considers an interval value of zero to mean that
-         * vsync should be disabled, but glXSwapIntervalSGI considers such a
-         * value to be an error. Just silently ignore the request for now.
-         */
-        if (!interval)
-            WARN("Request to disable vertical sync is not handled\n");
-        else
-            ret = !pglXSwapIntervalSGI(interval);
-        break;
-
-    case GLX_SWAP_CONTROL_NONE:
-        /* Unlikely to happen on modern GLX implementations */
-        WARN("Request to adjust swap interval is not handled\n");
-        break;
-    }
-
+    ret = set_swap_interval(gl->drawable, interval);
+    gl->refresh_swap_interval = FALSE;
     if (ret)
         gl->swap_interval = interval;
     else
@@ -3201,6 +3214,12 @@ static BOOL glxdrv_wglSwapBuffers( HDC hdc )
     {
         SetLastError( ERROR_INVALID_HANDLE );
         return FALSE;
+    }
+
+    if (gl->refresh_swap_interval)
+    {
+        set_swap_interval(gl->drawable, gl->swap_interval);
+        gl->refresh_swap_interval = FALSE;
     }
 
     switch (gl->type)

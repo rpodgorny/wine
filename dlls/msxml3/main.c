@@ -35,6 +35,7 @@
 #  ifdef HAVE_LIBXSLT_TRANSFORM_H
 #   include <libxslt/transform.h>
 #  endif
+#  include <libxslt/imports.h>
 #  include <libxslt/xsltutils.h>
 #  include <libxslt/variables.h>
 #  include <libxslt/xsltInternals.h>
@@ -63,9 +64,9 @@ HINSTANCE MSXML_hInstance = NULL;
 
 void wineXmlCallbackLog(char const* caller, xmlErrorLevel lvl, char const* msg, va_list ap)
 {
-    static const int max_size = 200;
     enum __wine_debug_class dbcl;
-    char buff[max_size];
+    char buff[200];
+    const int max_size = sizeof(buff) / sizeof(buff[0]);
     int len;
 
     switch (lvl)
@@ -171,8 +172,10 @@ DECL_FUNCPTR(xsltCleanupGlobals);
 DECL_FUNCPTR(xsltFreeStylesheet);
 DECL_FUNCPTR(xsltFreeTransformContext);
 DECL_FUNCPTR(xsltNewTransformContext);
+DECL_FUNCPTR(xsltNextImport);
 DECL_FUNCPTR(xsltParseStylesheetDoc);
 DECL_FUNCPTR(xsltQuoteUserParams);
+DECL_FUNCPTR(xsltSaveResultTo);
 # undef DECL_FUNCPTR
 #endif
 
@@ -195,8 +198,10 @@ static void init_libxslt(void)
     LOAD_FUNCPTR(xsltFreeStylesheet, 1);
     LOAD_FUNCPTR(xsltFreeTransformContext, 1);
     LOAD_FUNCPTR(xsltNewTransformContext, 1);
+    LOAD_FUNCPTR(xsltNextImport, 1);
     LOAD_FUNCPTR(xsltParseStylesheetDoc, 1);
     LOAD_FUNCPTR(xsltQuoteUserParams, 1);
+    LOAD_FUNCPTR(xsltSaveResultTo, 1);
 #undef LOAD_FUNCPTR
 
     if (pxsltInit)

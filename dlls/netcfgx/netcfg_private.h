@@ -1,7 +1,5 @@
 /*
- * msvcr71 main file
- *
- * Copyright (C) 2008 Hans Leidekker
+ * Copyright 2014 Alistair Leslie-Hughes
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,21 +15,9 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+#ifndef __NETCFG_PRIVATE_H__
+#define __NETCFG_PRIVATE_H__
 
-#include <stdarg.h>
+extern HRESULT INetCfg_CreateInstance(IUnknown **ppUnk) DECLSPEC_HIDDEN;
 
-#include "windef.h"
-#include "winbase.h"
-
-BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
-{
-    switch (reason)
-    {
-    case DLL_WINE_PREATTACH:
-        return FALSE;  /* prefer native version */
-    case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls( inst );
-        break;
-    }
-    return TRUE;
-}
+#endif

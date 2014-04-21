@@ -174,10 +174,24 @@ struct d3d8_device
 HRESULT device_init(struct d3d8_device *device, struct d3d8 *parent, struct wined3d *wined3d, UINT adapter,
         D3DDEVTYPE device_type, HWND focus_window, DWORD flags, D3DPRESENT_PARAMETERS *parameters) DECLSPEC_HIDDEN;
 
+struct d3d8_resource
+{
+    LONG refcount;
+    struct wined3d_private_store private_store;
+};
+
+void d3d8_resource_cleanup(struct d3d8_resource *resource) DECLSPEC_HIDDEN;
+HRESULT d3d8_resource_free_private_data(struct d3d8_resource *resource, const GUID *guid) DECLSPEC_HIDDEN;
+HRESULT d3d8_resource_get_private_data(struct d3d8_resource *resource, const GUID *guid,
+        void *data, DWORD *data_size) DECLSPEC_HIDDEN;
+void d3d8_resource_init(struct d3d8_resource *resource) DECLSPEC_HIDDEN;
+HRESULT d3d8_resource_set_private_data(struct d3d8_resource *resource, const GUID *guid,
+        const void *data, DWORD data_size, DWORD flags) DECLSPEC_HIDDEN;
+
 struct d3d8_volume
 {
     IDirect3DVolume8 IDirect3DVolume8_iface;
-    LONG refcount;
+    struct d3d8_resource resource;
     struct wined3d_volume *wined3d_volume;
     IUnknown *container;
     IUnknown *forwardReference;
@@ -200,7 +214,7 @@ HRESULT d3d8_swapchain_create(struct d3d8_device *device, struct wined3d_swapcha
 struct d3d8_surface
 {
     IDirect3DSurface8 IDirect3DSurface8_iface;
-    LONG refcount;
+    struct d3d8_resource resource;
     struct wined3d_surface *wined3d_surface;
     IDirect3DDevice8 *parent_device;
 
@@ -218,7 +232,7 @@ struct d3d8_surface *unsafe_impl_from_IDirect3DSurface8(IDirect3DSurface8 *iface
 struct d3d8_vertexbuffer
 {
     IDirect3DVertexBuffer8 IDirect3DVertexBuffer8_iface;
-    LONG refcount;
+    struct d3d8_resource resource;
     struct wined3d_buffer *wined3d_buffer;
     IDirect3DDevice8 *parent_device;
     DWORD fvf;
@@ -231,7 +245,7 @@ struct d3d8_vertexbuffer *unsafe_impl_from_IDirect3DVertexBuffer8(IDirect3DVerte
 struct d3d8_indexbuffer
 {
     IDirect3DIndexBuffer8 IDirect3DIndexBuffer8_iface;
-    LONG refcount;
+    struct d3d8_resource resource;
     struct wined3d_buffer *wined3d_buffer;
     IDirect3DDevice8 *parent_device;
     enum wined3d_format_id format;
@@ -244,7 +258,7 @@ struct d3d8_indexbuffer *unsafe_impl_from_IDirect3DIndexBuffer8(IDirect3DIndexBu
 struct d3d8_texture
 {
     IDirect3DBaseTexture8 IDirect3DBaseTexture8_iface;
-    LONG refcount;
+    struct d3d8_resource resource;
     struct wined3d_texture *wined3d_texture;
     IDirect3DDevice8 *parent_device;
 };

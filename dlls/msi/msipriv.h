@@ -614,7 +614,7 @@ typedef struct tagMSICLASS
     MSIFEATURE *Feature;
     INT Attributes;
     /* not in the table, set during installation */
-    BOOL Installed;
+    INSTALLSTATE action;
 } MSICLASS;
 
 typedef struct tagMSIMIME MSIMIME;
@@ -629,7 +629,7 @@ typedef struct tagMSIEXTENSION
     MSIMIME *Mime;
     MSIFEATURE *Feature;
     /* not in the table, set during installation */
-    BOOL Installed;
+    INSTALLSTATE action;
     struct list verbs;
 } MSIEXTENSION;
 
@@ -642,7 +642,6 @@ struct tagMSIPROGID
     LPWSTR Description;
     LPWSTR IconPath;
     /* not in the table, set during installation */
-    BOOL InstallMe;
     MSIPROGID *CurVer;
     MSIPROGID *VersionInd;
 };
@@ -664,8 +663,6 @@ struct tagMSIMIME
     LPWSTR suffix;
     LPWSTR clsid;
     MSICLASS *Class;
-    /* not in the table, set during installation */
-    BOOL InstallMe;
 };
 
 enum SCRIPTS

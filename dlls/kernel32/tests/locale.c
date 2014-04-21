@@ -88,6 +88,8 @@ static INT (WINAPI *pIdnToUnicode)(DWORD, LPCWSTR, INT, LPWSTR, INT);
 static INT (WINAPI *pGetLocaleInfoEx)(LPCWSTR, LCTYPE, LPWSTR, INT);
 static BOOL (WINAPI *pIsValidLocaleName)(LPCWSTR);
 static INT (WINAPI *pCompareStringOrdinal)(const WCHAR *, INT, const WCHAR *, INT, BOOL);
+static INT (WINAPI *pCompareStringEx)(LPCWSTR, DWORD, LPCWSTR, INT, LPCWSTR, INT,
+                                      LPNLSVERSIONINFO, LPVOID, LPARAM);
 
 static void InitFunctionPointers(void)
 {
@@ -108,6 +110,7 @@ static void InitFunctionPointers(void)
   pGetLocaleInfoEx = (void*)GetProcAddress(hKernel32, "GetLocaleInfoEx");
   pIsValidLocaleName = (void*)GetProcAddress(hKernel32, "IsValidLocaleName");
   pCompareStringOrdinal = (void*)GetProcAddress(hKernel32, "CompareStringOrdinal");
+  pCompareStringEx = (void*)GetProcAddress(hKernel32, "CompareStringEx");
 }
 
 #define eq(received, expected, label, type) \
@@ -1472,6 +1475,202 @@ static void test_CompareStringA(void)
         "ret %d, error %d, expected value %d\n", ret, GetLastError(), CSTR_EQUAL);
 }
 
+struct comparestringex_test {
+    const char *locale;
+    DWORD flags;
+    const WCHAR first[2];
+    const WCHAR second[2];
+    INT ret;
+    INT broken;
+    BOOL todo;
+};
+
+static const struct comparestringex_test comparestringex_tests[] = {
+    /* default behavior */
+    { /* 0 */
+      "tr-TR", 0,
+      {'i',0},   {'I',0},   CSTR_LESS_THAN,    -1,                FALSE
+    },
+    { /* 1 */
+      "tr-TR", 0,
+      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+    },
+    { /* 2 */
+      "tr-TR", 0,
+      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+    },
+    { /* 3 */
+      "tr-TR", 0,
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                TRUE
+    },
+    { /* 4 */
+      "tr-TR", 0,
+      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+    },
+    { /* 5 */
+      "tr-TR", 0,
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                TRUE
+    },
+    /* with NORM_IGNORECASE */
+    { /* 6 */
+      "tr-TR", NORM_IGNORECASE,
+      {'i',0},   {'I',0},   CSTR_EQUAL,        -1,                FALSE
+    },
+    { /* 7 */
+      "tr-TR", NORM_IGNORECASE,
+      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                TRUE
+    },
+    { /* 8 */
+      "tr-TR", NORM_IGNORECASE,
+      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+    },
+    { /* 9 */
+      "tr-TR", NORM_IGNORECASE,
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                TRUE
+    },
+    { /* 10 */
+      "tr-TR", NORM_IGNORECASE,
+      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+    },
+    { /* 11 */
+      "tr-TR", NORM_IGNORECASE,
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                TRUE
+    },
+    /* with NORM_LINGUISTIC_CASING */
+    { /* 12 */
+      "tr-TR", NORM_LINGUISTIC_CASING,
+      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+    },
+    { /* 13 */
+      "tr-TR", NORM_LINGUISTIC_CASING,
+      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+    },
+    { /* 14 */
+      "tr-TR", NORM_LINGUISTIC_CASING,
+      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+    },
+    { /* 15 */
+      "tr-TR", NORM_LINGUISTIC_CASING,
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                TRUE
+    },
+    { /* 16 */
+      "tr-TR", NORM_LINGUISTIC_CASING,
+      {'I',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+    },
+    { /* 17 */
+      "tr-TR", NORM_LINGUISTIC_CASING,
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                TRUE
+    },
+    /* with LINGUISTIC_IGNORECASE */
+    { /* 18 */
+      "tr-TR", LINGUISTIC_IGNORECASE,
+      {'i',0},   {'I',0},   CSTR_EQUAL,        -1,                TRUE
+    },
+    { /* 19 */
+      "tr-TR", LINGUISTIC_IGNORECASE,
+      {'i',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                FALSE
+    },
+    { /* 20 */
+      "tr-TR", LINGUISTIC_IGNORECASE,
+      {'i',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+    },
+    { /* 21 */
+      "tr-TR", LINGUISTIC_IGNORECASE,
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                TRUE
+    },
+    { /* 22 */
+      "tr-TR", LINGUISTIC_IGNORECASE,
+      {'I',0},   {0x131,0}, CSTR_LESS_THAN,    -1,                FALSE
+    },
+    { /* 23 */
+      "tr-TR", LINGUISTIC_IGNORECASE,
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                TRUE
+    },
+    /* with NORM_LINGUISTIC_CASING | NORM_IGNORECASE */
+    { /* 24 */
+      "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
+      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_EQUAL,        TRUE
+    },
+    { /* 25 */
+      "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
+      {'i',0},   {0x130,0}, CSTR_EQUAL,        CSTR_LESS_THAN,    FALSE
+    },
+    { /* 26 */
+      "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
+      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+    },
+    { /* 27 */
+      "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                TRUE
+     },
+    { /* 28 */
+      "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
+      {'I',0},   {0x131,0}, CSTR_EQUAL,        CSTR_LESS_THAN,    TRUE
+    },
+    { /* 29 */
+      "tr-TR", NORM_LINGUISTIC_CASING | NORM_IGNORECASE,
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, -1,                TRUE
+    },
+    /* with NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE */
+    { /* 30 */
+      "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
+      {'i',0},   {'I',0},   CSTR_GREATER_THAN, CSTR_EQUAL,        TRUE
+    },
+    { /* 31 */
+      "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
+      {'i',0},   {0x130,0}, CSTR_EQUAL,        CSTR_LESS_THAN,    TRUE
+    },
+    { /* 32 */
+      "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
+      {'i',0},   {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+    },
+    { /* 33 */
+      "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
+      {'I',0},   {0x130,0}, CSTR_LESS_THAN,    -1,                TRUE
+    },
+    { /* 34 */
+      "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
+      {'I',0},   {0x131,0}, CSTR_EQUAL,        CSTR_LESS_THAN,    TRUE
+    },
+    { /* 35 */
+      "tr-TR", NORM_LINGUISTIC_CASING | LINGUISTIC_IGNORECASE,
+      {0x130,0}, {0x131,0}, CSTR_GREATER_THAN, CSTR_LESS_THAN,    TRUE
+    }
+};
+
+static void test_CompareStringEx(void)
+{
+    const char *op[] = {"ERROR", "CSTR_LESS_THAN", "CSTR_EQUAL", "CSTR_GREATER_THAN"};
+    WCHAR locale[6];
+    INT ret, i;
+
+    /* CompareStringEx is only available on Vista+ */
+    if (!pCompareStringEx)
+    {
+        win_skip("CompareStringEx not supported\n");
+        return;
+    }
+
+    for (i = 0; i < sizeof(comparestringex_tests)/sizeof(comparestringex_tests[0]); i++)
+    {
+        const struct comparestringex_test *e = &comparestringex_tests[i];
+
+        MultiByteToWideChar(CP_ACP, 0, e->locale, -1, locale, sizeof(locale)/sizeof(WCHAR));
+        ret = pCompareStringEx(locale, e->flags, e->first, -1, e->second, -1, NULL, NULL, 0);
+        if (e->todo)
+        {
+            todo_wine ok(ret == e->ret || broken(ret == e->broken),
+                         "%d: got %s, expected %s\n", i, op[ret], op[e->ret]);
+        }
+        else
+        {
+            ok(ret == e->ret || broken(ret == e->broken),
+               "%d: got %s, expected %s\n", i, op[ret], op[e->ret]);
+        }
+    }
+
+}
+
 static void test_LCMapStringA(void)
 {
     int ret, ret2;
@@ -2320,6 +2519,7 @@ static void test_FoldStringW(void)
     0x0030, /* '0'-'9' */
     0x0660, /* Eastern Arabic */
     0x06F0, /* Arabic - Hindu */
+    0x07C0, /* Nko */
     0x0966, /* Devengari */
     0x09E6, /* Bengalii */
     0x0A66, /* Gurmukhi */
@@ -2331,16 +2531,37 @@ static void test_FoldStringW(void)
     0x0D66, /* Maylayalam */
     0x0E50, /* Thai */
     0x0ED0, /* Laos */
-    0x0F29, /* Tibet - 0 is out of sequence */
+    0x0F20, /* Tibet */
+    0x0F29, /* Tibet half - 0 is out of sequence */
+    0x1040, /* Myanmar */
+    0x1090, /* Myanmar Shan */
+    0x1368, /* Ethiopic - no 0 */
+    0x17E0, /* Khmer */
+    0x1810, /* Mongolian */
+    0x1946, /* Limbu */
+    0x19D0, /* New Tai Lue */
+    0x1A80, /* Tai Tham Hora */
+    0x1A90, /* Tai Tham Tham */
+    0x1B50, /* Balinese */
+    0x1BB0, /* Sundanese */
+    0x1C40, /* Lepcha */
+    0x1C50, /* Ol Chiki */
     0x2070, /* Superscript - 1, 2, 3 are out of sequence */
     0x2080, /* Subscript */
     0x245F, /* Circled - 0 is out of sequence */
     0x2473, /* Bracketed */
     0x2487, /* Full stop */
+    0x24F4, /* Double Circled */
     0x2775, /* Inverted circled - No 0 */
     0x277F, /* Patterned circled - No 0 */
     0x2789, /* Inverted Patterned circled - No 0 */
     0x3020, /* Hangzhou */
+    0xA620, /* Vai */
+    0xA8D0, /* Saurashtra */
+    0xA900, /* Kayah Li */
+    0xA9D0, /* Javanese */
+    0xAA50, /* Cham */
+    0xABF0, /* Meetei Mayek */
     0xff10, /* Pliene chasse (?) */
     0xffff  /* Terminator */
   };
@@ -2350,8 +2571,17 @@ static void test_FoldStringW(void)
       0xB9,   /* Superscript 1 */
       0xB2,   /* Superscript 2 */
       0xB3,   /* Superscript 3 */
+      0x0C78, /* Telugu Fraction 0 */
+      0x0C79, /* Telugu Fraction 1 */
+      0x0C7A, /* Telugu Fraction 2 */
+      0x0C7B, /* Telugu Fraction 3 */
+      0x0C7C, /* Telugu Fraction 1 */
+      0x0C7D, /* Telugu Fraction 2 */
+      0x0C7E, /* Telugu Fraction 3 */
       0x0F33, /* Tibetan half zero */
+      0x19DA, /* New Tai Lue Tham 1 */
       0x24EA, /* Circled 0 */
+      0x24FF, /* Negative Circled 0 */
       0x3007, /* Ideographic number zero */
       '\0'    /* Terminator */
   };
@@ -2360,8 +2590,10 @@ static void test_FoldStringW(void)
   {
       0x0BE6, /* No Tamil 0 */
       0x0F29, /* No Tibetan half zero (out of sequence) */
+      0x1368, /* No Ethiopic 0 */
       0x2473, /* No Bracketed 0 */
       0x2487, /* No 0 Full stop */
+      0x24F4, /* No double circled 0 */
       0x2775, /* No inverted circled 0 */
       0x277F, /* No patterned circled */
       0x2789, /* No inverted Patterned circled */
@@ -2489,10 +2721,11 @@ static void test_FoldStringW(void)
       ok(ret == 2, "Expected ret == 2, got %d, error %d\n", ret, GetLastError());
 
       ok(dst[0] == ch || strchrW(outOfSequenceDigits, ch) ||
-         /* Wine (correctly) maps all Unicode 4.0+ digits */
-         isdigitW(ch) || (ch >= 0x24F5 && ch <= 0x24FD) || ch == 0x24FF || ch == 0x19da ||
-         (ch >= 0x1369 && ch <= 0x1371),
-         "MAP_FOLDDIGITS: ch %d 0x%04x Expected unchanged got %d\n", ch, ch, dst[0]);
+         (ch >= 0xa8e0 && ch <= 0xa8e9),  /* combining Devanagari on Win8 */
+         "MAP_FOLDDIGITS: ch 0x%04x Expected unchanged got %04x\n", ch, dst[0]);
+      ok(!isdigitW(ch) || strchrW(outOfSequenceDigits, ch) ||
+         broken( ch >= 0xbf0 && ch <= 0xbf2 ), /* win2k */
+         "char %04x should not be a digit\n", ch );
     }
 
     if (digitRanges[j] == 0xffff)
@@ -2519,7 +2752,7 @@ static void test_FoldStringW(void)
          (digitRanges[j] == 0x3020 && dst[0] == ch) || /* Hangzhou not present in all Windows versions */
          (digitRanges[j] == 0x0F29 && dst[0] == ch) || /* Tibetan not present in all Windows versions */
          strchrW(noDigitAvailable, c),
-         "MAP_FOLDDIGITS: ch %d Expected %d got %d\n",
+         "MAP_FOLDDIGITS: ch %04x Expected %04x got %04x\n",
          ch, '0' + digitRanges[j] - ch, dst[0]);
     }
     prev_ch = ch;
@@ -3608,6 +3841,7 @@ START_TEST(locale)
   test_GetCurrencyFormatA(); /* Also tests the W version */
   test_GetNumberFormatA();   /* Also tests the W version */
   test_CompareStringA();
+  test_CompareStringEx();
   test_LCMapStringA();
   test_LCMapStringW();
   test_LCMapStringEx();

@@ -285,14 +285,16 @@ int CDECL _abnormal_termination(void)
 }
 
 /******************************************************************
- *		MSVCRT___uncaught_exception
+ *		__uncaught_exception (MSVCRT.@)
  */
 BOOL CDECL MSVCRT___uncaught_exception(void)
 {
     return FALSE;
 }
 
-/* _set_security_error_handler - not exported in native msvcrt, added in msvcr70 */
+/*********************************************************************
+ *		_set_security_error_handler (MSVCR70.@)
+ */
 MSVCRT_security_error_handler CDECL _set_security_error_handler(
     MSVCRT_security_error_handler handler )
 {
@@ -304,7 +306,9 @@ MSVCRT_security_error_handler CDECL _set_security_error_handler(
     return old;
 }
 
-/* __security_error_handler - not exported in native msvcrt */
+/*********************************************************************
+ *		__security_error_handler (MSVCR70.@)
+ */
 void CDECL __security_error_handler(int code, void *data)
 {
     if(security_error_handler)
@@ -313,4 +317,12 @@ void CDECL __security_error_handler(int code, void *data)
         FIXME("(%d, %p) stub\n", code, data);
 
     MSVCRT__exit(3);
+}
+
+/*********************************************************************
+ *  __crtSetUnhandledExceptionFilter (MSVCR110.@)
+ */
+LPTOP_LEVEL_EXCEPTION_FILTER CDECL MSVCR110__crtSetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_FILTER filter)
+{
+    return SetUnhandledExceptionFilter(filter);
 }

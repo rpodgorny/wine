@@ -134,7 +134,6 @@ extern HRESULT get_typeinfo(tid_t tid, ITypeInfo **typeinfo) DECLSPEC_HIDDEN;
 extern void release_typelib(void) DECLSPEC_HIDDEN;
 
 typedef struct dispex_data_t dispex_data_t;
-typedef struct dispex_dynamic_data_t dispex_dynamic_data_t;
 
 typedef struct {
     HRESULT (*get_dispid)(IUnknown*,BSTR,DWORD,DISPID*);
@@ -154,7 +153,6 @@ typedef struct {
     IUnknown *outer;
 
     dispex_static_data_t *data;
-    dispex_dynamic_data_t *dynamic_data;
 } DispatchEx;
 
 extern HINSTANCE MSXML_hInstance DECLSPEC_HIDDEN;
@@ -179,6 +177,11 @@ static inline void *heap_alloc_zero(size_t len)
 static inline void *heap_realloc(void *mem, size_t len)
 {
     return HeapReAlloc(GetProcessHeap(), 0, mem, len);
+}
+
+static inline void *heap_realloc_zero(void *mem, size_t len)
+{
+    return HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, mem, len);
 }
 
 static inline BOOL heap_free(void *mem)
@@ -369,7 +372,7 @@ extern HRESULT node_get_text(const xmlnode*,BSTR*) DECLSPEC_HIDDEN;
 extern HRESULT node_select_nodes(const xmlnode*,BSTR,IXMLDOMNodeList**) DECLSPEC_HIDDEN;
 extern HRESULT node_select_singlenode(const xmlnode*,BSTR,IXMLDOMNode**) DECLSPEC_HIDDEN;
 extern HRESULT node_transform_node(const xmlnode*,IXMLDOMNode*,BSTR*) DECLSPEC_HIDDEN;
-extern HRESULT node_transform_node_params(const xmlnode*,IXMLDOMNode*,BSTR*,const struct xslprocessor_params*) DECLSPEC_HIDDEN;
+extern HRESULT node_transform_node_params(const xmlnode*,IXMLDOMNode*,BSTR*,IStream*,const struct xslprocessor_params*) DECLSPEC_HIDDEN;
 extern HRESULT node_create_supporterrorinfo(const tid_t*,void**) DECLSPEC_HIDDEN;
 
 extern HRESULT get_domdoc_from_xmldoc(xmlDocPtr xmldoc, IXMLDOMDocument3 **document) DECLSPEC_HIDDEN;
@@ -453,6 +456,18 @@ static inline HRESULT return_bstr(const WCHAR *value, BSTR *p)
     }else {
         *p = NULL;
     }
+
+    return S_OK;
+}
+
+static inline HRESULT return_bstrn(const WCHAR *value, int len, BSTR *p)
+{
+    if(value) {
+        *p = SysAllocStringLen(value, len);
+        if(!*p)
+            return E_OUTOFMEMORY;
+    }else
+        *p = NULL;
 
     return S_OK;
 }

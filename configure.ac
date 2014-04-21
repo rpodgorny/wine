@@ -217,13 +217,16 @@ AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
      fi
    fi
    if test -z "$wine_cv_toolsdir"; then
+     wine_makedep=tools/makedep
      wine_cv_toolsdir="\$(top_builddir)"
    elif test -d "$wine_cv_toolsdir/tools/winebuild"; then
+     wine_makedep=$wine_cv_toolsdir/tools/makedep
      case "$wine_cv_toolsdir" in
        /*) ;;
        *)  wine_cv_toolsdir="\$(top_builddir)/$wine_cv_toolsdir" ;;
      esac
      enable_tools=${enable_tools:-no}
+     test -f "$wine_makedep" || AC_MSG_ERROR([the Wine tools have not yet been built in $wine_cv_toolsdir])
    else
      AC_MSG_ERROR([could not find Wine tools in $wine_cv_toolsdir])
    fi])
@@ -1818,6 +1821,7 @@ then
   WINE_TRY_CFLAGS([-Wstrict-prototypes])
   WINE_TRY_CFLAGS([-Wtype-limits])
   WINE_TRY_CFLAGS([-Wunused-but-set-parameter])
+  WINE_TRY_CFLAGS([-Wvla])
   WINE_TRY_CFLAGS([-Wwrite-strings])
 
   dnl Check for noisy string.h
@@ -2634,7 +2638,7 @@ CLEAN_FILES = *.o *.a *.so *.res *.fake *.ok *.tab.[[ch]] *.yy.c
 .MAKEFILEDEPS:
 all: Makefile
 Makefile: $srcdir/Makefile.in $srcdir/Make.vars.in config.status \$(MAKEDEP)
-	@./config.status Make.tmp Makefile && \$(MAKEDEP) .])
+	@./config.status Make.tmp Makefile])
 
 test "$srcdir" = . && WINE_APPEND_RULE(
 [all: .gitignore
@@ -2882,6 +2886,7 @@ WINE_CONFIG_TEST(dlls/dsound/tests)
 WINE_CONFIG_DLL(dssenh)
 WINE_CONFIG_TEST(dlls/dssenh/tests)
 WINE_CONFIG_DLL(dswave,,[clean])
+WINE_CONFIG_TEST(dlls/dswave/tests)
 WINE_CONFIG_DLL(dwmapi,,[implib])
 WINE_CONFIG_DLL(dwrite,,[implib])
 WINE_CONFIG_TEST(dlls/dwrite/tests)
@@ -2892,12 +2897,15 @@ WINE_CONFIG_LIB(dxerr9)
 WINE_CONFIG_DLL(dxgi,,[implib])
 WINE_CONFIG_TEST(dlls/dxgi/tests)
 WINE_CONFIG_LIB(dxguid)
+WINE_CONFIG_DLL(dxva2)
 WINE_CONFIG_DLL(explorerframe,,[clean])
 WINE_CONFIG_TEST(dlls/explorerframe/tests)
 WINE_CONFIG_DLL(ext-ms-win-gdi-devcaps-l1-1-0)
 WINE_CONFIG_DLL(faultrep,,[implib])
 WINE_CONFIG_TEST(dlls/faultrep/tests)
 WINE_CONFIG_DLL(fltlib)
+WINE_CONFIG_DLL(fntcache)
+WINE_CONFIG_DLL(fontsub)
 WINE_CONFIG_DLL(fusion)
 WINE_CONFIG_TEST(dlls/fusion/tests)
 WINE_CONFIG_DLL(fwpuclnt)
@@ -3062,7 +3070,10 @@ WINE_CONFIG_DLL(msxml6,,[clean])
 WINE_CONFIG_DLL(nddeapi,,[implib])
 WINE_CONFIG_DLL(netapi32,,[implib])
 WINE_CONFIG_TEST(dlls/netapi32/tests)
-WINE_CONFIG_DLL(netcfgx)
+WINE_CONFIG_DLL(netcfgx,,[clean])
+WINE_CONFIG_TEST(dlls/netcfgx/tests)
+WINE_CONFIG_DLL(netprofm,,[clean])
+WINE_CONFIG_TEST(dlls/netprofm/tests)
 WINE_CONFIG_DLL(newdev,,[implib])
 WINE_CONFIG_DLL(normaliz,,[implib])
 WINE_CONFIG_DLL(npmshtml)
@@ -3147,6 +3158,8 @@ WINE_CONFIG_DLL(scarddlg)
 WINE_CONFIG_DLL(sccbase)
 WINE_CONFIG_DLL(schannel)
 WINE_CONFIG_TEST(dlls/schannel/tests)
+WINE_CONFIG_DLL(schedsvc,,[clean])
+WINE_CONFIG_TEST(dlls/schedsvc/tests,[clean])
 WINE_CONFIG_DLL(scrrun,,[clean])
 WINE_CONFIG_TEST(dlls/scrrun/tests,[clean])
 WINE_CONFIG_DLL(scsiport.sys)
@@ -3302,6 +3315,7 @@ WINE_CONFIG_DLL(wsnmp32,,[implib])
 WINE_CONFIG_TEST(dlls/wsnmp32/tests)
 WINE_CONFIG_DLL(wsock32,,[implib])
 WINE_CONFIG_DLL(wtsapi32,,[implib])
+WINE_CONFIG_TEST(dlls/wtsapi32/tests)
 WINE_CONFIG_DLL(wuapi,,[clean])
 WINE_CONFIG_DLL(wuaueng)
 WINE_CONFIG_DLL(xapofx1_1)
@@ -3365,12 +3379,13 @@ WINE_CONFIG_PROGRAM(regasm,,[install])
 WINE_CONFIG_PROGRAM(regedit,,[install,installbin,manpage,po])
 WINE_CONFIG_TEST(programs/regedit/tests)
 WINE_CONFIG_PROGRAM(regsvcs,,[install])
-WINE_CONFIG_PROGRAM(regsvr32,,[install,installbin,manpage])
+WINE_CONFIG_PROGRAM(regsvr32,,[install,installbin,manpage,po])
 WINE_CONFIG_PROGRAM(rpcss,,[clean,install])
 WINE_CONFIG_PROGRAM(rundll.exe16,enable_win16,[install])
 WINE_CONFIG_PROGRAM(rundll32,,[install])
 WINE_CONFIG_PROGRAM(sc,,[install])
 WINE_CONFIG_PROGRAM(schtasks,,[install])
+WINE_CONFIG_PROGRAM(sdbinst,,[install])
 WINE_CONFIG_PROGRAM(secedit,,[install])
 WINE_CONFIG_PROGRAM(servicemodelreg,,[install])
 WINE_CONFIG_PROGRAM(services,,[clean,install])
@@ -3385,6 +3400,7 @@ WINE_CONFIG_PROGRAM(termsv,,[install])
 WINE_CONFIG_PROGRAM(uninstaller,,[install,po])
 WINE_CONFIG_PROGRAM(unlodctr,,[install])
 WINE_CONFIG_PROGRAM(view,,[install,po])
+WINE_CONFIG_PROGRAM(wevtutil,,[install])
 WINE_CONFIG_PROGRAM(wineboot,,[install,installbin,manpage,po])
 WINE_CONFIG_PROGRAM(winebrowser,,[install])
 WINE_CONFIG_PROGRAM(winecfg,,[install,installbin,manpage,po])
@@ -3498,7 +3514,7 @@ fi
 AC_CONFIG_COMMANDS([Makefile], [wine_fn_output_makefile Makefile],
 [wine_fn_output_makefile ()
 {
-    cat Make.tmp - <<\_WINE_EOF >\$tmp/makefile && mv -f \$tmp/makefile \$[]1 && rm -f Make.tmp && return
+    cat Make.tmp - <<\_WINE_EOF >\$tmp/makefile && mv -f \$tmp/makefile \$[]1 && rm -f Make.tmp && "$wine_makedep" . && return
 `cat $wine_rules_file`
 _WINE_EOF
     AS_ERROR([could not create Makefile])

@@ -376,9 +376,10 @@ static void _expect_no_children(IXMLDOMNode *node, int line)
 #define EXPECT_REF(node,ref) _expect_ref((IUnknown*)node, ref, __LINE__)
 static void _expect_ref(IUnknown* obj, ULONG ref, int line)
 {
-    ULONG rc = IUnknown_AddRef(obj);
-    IUnknown_Release(obj);
-    ok_(__FILE__,line)(rc-1 == ref, "expected refcount %d, got %d\n", ref, rc-1);
+    ULONG rc;
+    IUnknown_AddRef(obj);
+    rc = IUnknown_Release(obj);
+    ok_(__FILE__,line)(rc == ref, "expected refcount %d, got %d\n", ref, rc);
 }
 
 #define EXPECT_LIST_LEN(list,len) _expect_list_len(list, len, __LINE__)
@@ -2493,18 +2494,18 @@ todo_wine {
     EXPECT_REF(elem2, 2);
 
     todo_wine ok(unk == unk2, "got %p and %p\n", unk, unk2);
-
     IUnknown_Release(unk);
-    IUnknown_Release(unk2);
 
     /* IUnknown refcount is not affected by node refcount */
-    todo_wine EXPECT_REF(unk2, 3);
+    todo_wine EXPECT_REF(unk2, 4);
     IXMLDOMElement_AddRef(elem2);
-    todo_wine EXPECT_REF(unk2, 3);
+    todo_wine EXPECT_REF(unk2, 4);
     IXMLDOMElement_Release(elem2);
 
     IXMLDOMElement_Release(elem2);
-    todo_wine EXPECT_REF(unk2, 2);
+    todo_wine EXPECT_REF(unk2, 3);
+
+    IUnknown_Release(unk2);
 
     hr = IXMLDOMElement_get_childNodes( element, &node_list );
     EXPECT_HR(hr, S_OK);
@@ -6077,7 +6078,8 @@ static void test_save(void)
     hr = IXMLDOMDocument_loadXML(doc, _bstr_("<a/>"), &b);
     EXPECT_HR(hr, S_OK);
 
-    CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
     V_VT(&dest) = VT_UNKNOWN;
     V_UNKNOWN(&dest) = (IUnknown*)stream;
     hr = IXMLDOMDocument_save(doc, dest);
@@ -6120,7 +6122,7 @@ static void test_testTransforms(void)
         ok(hr == S_OK, "ret %08x\n", hr );
         if(hr == S_OK)
         {
-            ok( compareIgnoreReturns( bOut, _bstr_(szTransformOutput)), "Stylesheet output not correct\n");
+            ok( compareIgnoreReturns( bOut, _bstr_(szTransformOutput)), "got output %s\n", wine_dbgstr_w(bOut));
             SysFreeString(bOut);
         }
 
@@ -8417,7 +8419,8 @@ todo_wine {
     hr = IXSLProcessor_put_output(processor, v);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
-    CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
     EXPECT_REF(stream, 1);
 
     V_VT(&v) = VT_UNKNOWN;
@@ -8469,7 +8472,7 @@ todo_wine {
     hr = IXSLProcessor_get_output(processor, &v);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(V_VT(&v) == VT_BSTR, "got type %d\n", V_VT(&v));
-    ok(lstrcmpW(V_BSTR(&v), _bstr_("")) == 0, "got %s\n", wine_dbgstr_w(V_BSTR(&v)));
+    ok(*V_BSTR(&v) == 0, "got %s\n", wine_dbgstr_w(V_BSTR(&v)));
     IXMLDOMDocument_Release(doc2);
     VariantClear(&v);
 
@@ -8875,6 +8878,12 @@ static void test_appendChild(void)
     todo_wine EXPECT_REF(elem2, 2);
     EXPECT_NO_CHILDREN(doc);
     EXPECT_NO_CHILDREN(doc2);
+
+    hr = IXMLDOMDocument_appendChild(doc2, NULL, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMElement_appendChild(elem, NULL, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
 
     /* append from another document */
     hr = IXMLDOMDocument_appendChild(doc2, (IXMLDOMNode*)elem, NULL);
@@ -9734,6 +9743,7 @@ static void test_load(void)
 
 static void test_domobj_dispex(IUnknown *obj)
 {
+    static const WCHAR testW[] = {'t','e','s','t','p','r','o','p',0};
     DISPID dispid = DISPID_XMLDOM_NODELIST_RESET;
     IDispatchEx *dispex;
     IUnknown *unk;
@@ -9771,9 +9781,15 @@ static void test_domobj_dispex(IUnknown *obj)
     hr = IDispatchEx_GetNextDispID(dispex, fdexEnumDefault, DISPID_XMLDOM_NODELIST_RESET, &dispid);
     EXPECT_HR(hr, E_NOTIMPL);
 
+    unk = (IUnknown*)0xdeadbeef;
     hr = IDispatchEx_GetNameSpaceParent(dispex, &unk);
     EXPECT_HR(hr, E_NOTIMPL);
-    if (hr == S_OK && unk) IUnknown_Release(unk);
+    ok(unk == (IUnknown*)0xdeadbeef, "got %p\n", unk);
+
+    name = SysAllocString(testW);
+    hr = IDispatchEx_GetDispID(dispex, name, fdexNameEnsure, &dispid);
+    ok(hr == DISP_E_UNKNOWNNAME, "got 0x%08x\n", hr);
+    SysFreeString(name);
 
     IDispatchEx_Release(dispex);
 }
@@ -10309,7 +10325,8 @@ static void test_dispex(void)
 
     doc = create_document(&IID_IXMLDOMDocument);
 
-    IXMLDOMDocument_QueryInterface(doc, &IID_IUnknown, (void**)&unk);
+    hr = IXMLDOMDocument_QueryInterface(doc, &IID_IUnknown, (void**)&unk);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
     test_domobj_dispex(unk);
     IUnknown_Release(unk);
 
@@ -10342,7 +10359,8 @@ static void test_dispex(void)
     /* IXMLDOMNodeList for children list */
     hr = IXMLDOMDocument_get_childNodes(doc, &node_list);
     EXPECT_HR(hr, S_OK);
-    IXMLDOMNodeList_QueryInterface(node_list, &IID_IUnknown, (void**)&unk);
+    hr = IXMLDOMNodeList_QueryInterface(node_list, &IID_IUnknown, (void**)&unk);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
     test_domobj_dispex(unk);
     IUnknown_Release(unk);
 
@@ -10375,7 +10393,8 @@ static void test_dispex(void)
     hr = IDispatchEx_Invoke(dispex, DISPID_VALUE, &IID_NULL, 0, DISPATCH_METHOD, &dispparams, &ret, NULL, NULL);
     ok(hr == DISP_E_BADPARAMCOUNT, "got 0x%08x\n", hr);
     ok(V_VT(&ret) == VT_EMPTY, "got %d\n", V_VT(&ret));
-    ok(V_DISPATCH(&ret) == (void*)0x1, "got %p\n", V_DISPATCH(&ret));
+todo_wine
+    ok(broken(V_DISPATCH(&ret) == (void*)0x1) || (V_DISPATCH(&ret) == NULL), "got %p\n", V_DISPATCH(&ret));
 
     V_VT(&arg) = VT_I4;
     V_I4(&arg) = 0;
@@ -10389,7 +10408,8 @@ static void test_dispex(void)
     hr = IDispatchEx_Invoke(dispex, DISPID_VALUE, &IID_NULL, 0, DISPATCH_METHOD, &dispparams, &ret, NULL, NULL);
     ok(hr == DISP_E_BADPARAMCOUNT, "got 0x%08x\n", hr);
     ok(V_VT(&ret) == VT_EMPTY, "got %d\n", V_VT(&ret));
-    ok(V_DISPATCH(&ret) == (void*)0x1, "got %p\n", V_DISPATCH(&ret));
+todo_wine
+    ok(broken(V_DISPATCH(&ret) == (void*)0x1) || (V_DISPATCH(&ret) == NULL), "got %p\n", V_DISPATCH(&ret));
 
     V_VT(&arg) = VT_I4;
     V_I4(&arg) = 0;
@@ -10441,7 +10461,8 @@ static void test_dispex(void)
     hr = IDispatchEx_Invoke(dispex, DISPID_DOM_NODELIST_LENGTH, &IID_NULL, 0, DISPATCH_METHOD, &dispparams, &ret, NULL, NULL);
     ok(hr == DISP_E_MEMBERNOTFOUND, "got 0x%08x\n", hr);
     ok(V_VT(&ret) == VT_EMPTY, "got %d\n", V_VT(&ret));
-    ok(V_I4(&ret) == 1, "got %d\n", V_I4(&ret));
+todo_wine
+    ok(broken(V_I4(&ret) == 1) || (V_I4(&ret) == 0), "got %d\n", V_I4(&ret));
 
     IXMLDOMNodeList_Release(node_list);
 
@@ -10466,7 +10487,8 @@ static void test_dispex(void)
     hr = IDispatchEx_Invoke(dispex, DISPID_VALUE, &IID_NULL, 0, DISPATCH_METHOD, &dispparams, &ret, NULL, NULL);
     ok(hr == DISP_E_MEMBERNOTFOUND, "got 0x%08x\n", hr);
     ok(V_VT(&ret) == VT_EMPTY, "got %d\n", V_VT(&ret));
-    ok(V_DISPATCH(&ret) == (void*)0x1, "got %p\n", V_DISPATCH(&ret));
+todo_wine
+    ok(broken(V_DISPATCH(&ret) == (void*)0x1) || (V_DISPATCH(&ret) == NULL), "got %p\n", V_DISPATCH(&ret));
 
     IDispatchEx_Release(dispex);
 
@@ -10540,8 +10562,9 @@ static void test_dispex(void)
 todo_wine {
     ok(hr == DISP_E_BADPARAMCOUNT, "got 0x%08x\n", hr);
     ok(V_VT(&ret) == VT_EMPTY, "got %d\n", V_VT(&ret));
-    ok(V_DISPATCH(&ret) == (void*)0x1, "got %p\n", V_DISPATCH(&ret));
 }
+    ok(broken(V_DISPATCH(&ret) == (void*)0x1) || (V_DISPATCH(&ret) == NULL), "got %p\n", V_DISPATCH(&ret));
+
     V_VT(&arg) = VT_I4;
     V_I4(&arg) = 0;
     dispparams.cArgs = 2;
@@ -10555,8 +10578,9 @@ todo_wine {
 todo_wine {
     ok(hr == DISP_E_BADPARAMCOUNT, "got 0x%08x\n", hr);
     ok(V_VT(&ret) == VT_EMPTY, "got %d\n", V_VT(&ret));
-    ok(V_DISPATCH(&ret) == (void*)0x1, "got %p\n", V_DISPATCH(&ret));
 }
+    ok(broken(V_DISPATCH(&ret) == (void*)0x1) || (V_DISPATCH(&ret) == NULL), "got %p\n", V_DISPATCH(&ret));
+
     V_VT(&arg) = VT_I4;
     V_I4(&arg) = 0;
     dispparams.cArgs = 1;
@@ -10607,10 +10631,10 @@ todo_wine
     V_I4(&ret) = 1;
     hr = IDispatchEx_Invoke(dispex, DISPID_DOM_NODELIST_LENGTH, &IID_NULL, 0, DISPATCH_METHOD, &dispparams, &ret, NULL, NULL);
     ok(hr == DISP_E_MEMBERNOTFOUND, "got 0x%08x\n", hr);
-todo_wine {
+todo_wine
     ok(V_VT(&ret) == VT_EMPTY, "got %d\n", V_VT(&ret));
-    ok(V_I4(&ret) == 1, "got %d\n", V_I4(&ret));
-}
+    ok(broken(V_I4(&ret) == 1) || (V_I4(&ret) == 0), "got %d\n", V_I4(&ret));
+
     IXMLDOMNamedNodeMap_Release(map);
     IXMLDOMElement_Release(elem);
 
@@ -10669,6 +10693,13 @@ todo_wine {
 
     IXSLProcessor_Release(processor);
     IXSLTemplate_Release(template);
+
+    if (is_clsid_supported(&CLSID_DOMDocument60, &IID_IXMLDOMDocument))
+    {
+        doc = create_document_version(60, &IID_IXMLDOMDocument);
+        test_domobj_dispex((IUnknown*)doc);
+        IXMLDOMDocument_Release(doc);
+    }
 
     free_bstrs();
 }
@@ -11251,7 +11282,7 @@ static void test_get_namespaces(void)
     node = (void*)0xdeadbeef;
     hr = IXMLDOMSchemaCollection_get(collection, _bstr_("http://blah.org"), &node);
     EXPECT_HR(hr, E_NOTIMPL);
-    ok(node == (void*)0xdeadbeef, "got %p\n", node);
+    ok(broken(node == (void*)0xdeadbeef) || (node == NULL), "got %p\n", node);
 
     /* load schema and try to add it */
     doc2 = create_document(&IID_IXMLDOMDocument2);
@@ -11277,7 +11308,7 @@ static void test_get_namespaces(void)
     s = (void*)0xdeadbeef;
     hr = IXMLDOMSchemaCollection_get_namespaceURI(collection, 2, &s);
     EXPECT_HR(hr, E_FAIL);
-    ok(s == (void*)0xdeadbeef, "got %p\n", s);
+    ok(broken(s == (void*)0xdeadbeef) || (s == NULL), "got %p\n", s);
 
     /* enumerate */
     enumv = (void*)0xdeadbeef;
@@ -11645,6 +11676,26 @@ static const char xsltext_xsl[] =
 "</xsl:template>"
 "</xsl:stylesheet>";
 
+static const char omitxmldecl_xsl[] =
+"<?xml version=\"1.0\"?>"
+"<xsl:stylesheet version=\"1.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\" >"
+"<xsl:output method=\"xml\" omit-xml-declaration=\"yes\"/>"
+"<xsl:template match=\"/\">"
+"    <xsl:for-each select=\"/a/item\">"
+"        <xsl:element name=\"node\">"
+"            <xsl:value-of select=\"@name\"/>"
+"        </xsl:element>"
+"    </xsl:for-each>"
+"</xsl:template>"
+"</xsl:stylesheet>";
+
+static const char omitxmldecl_doc[] =
+"<?xml version=\"1.0\"?>"
+"<a>"
+"    <item name=\"item1\"/>"
+"    <item name=\"item2\"/>"
+"</a>";
+
 static void test_xsltext(void)
 {
     IXMLDOMDocument *doc, *doc2;
@@ -11664,6 +11715,17 @@ static void test_xsltext(void)
     hr = IXMLDOMDocument_transformNode(doc2, (IXMLDOMNode*)doc, &ret);
     EXPECT_HR(hr, S_OK);
     ok(!lstrcmpW(ret, _bstr_("testdata")), "transform result %s\n", wine_dbgstr_w(ret));
+    SysFreeString(ret);
+
+    /* omit-xml-declaration */
+    hr = IXMLDOMDocument_loadXML(doc, _bstr_(omitxmldecl_xsl), &b);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IXMLDOMDocument_loadXML(doc2, _bstr_(omitxmldecl_doc), &b);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMDocument_transformNode(doc2, (IXMLDOMNode*)doc, &ret);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(!lstrcmpW(ret, _bstr_("<node>item1</node><node>item2</node>")), "transform result %s\n", wine_dbgstr_w(ret));
     SysFreeString(ret);
 
     IXMLDOMDocument_Release(doc2);

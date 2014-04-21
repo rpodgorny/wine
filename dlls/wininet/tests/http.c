@@ -2196,7 +2196,7 @@ static DWORD CALLBACK server_thread(LPVOID param)
             if (!memcmp(buffer, "GET ", sizeof("GET ")-1) &&
                 !strstr(buffer, "Cache-Control: no-cache\r\n")) send(c, okmsg, sizeof(okmsg)-1, 0);
             else if (strstr(buffer, "Cache-Control: no-cache\r\n")) send(c, okmsg, sizeof(okmsg)-1, 0);
-            send(c, notokmsg, sizeof(notokmsg)-1, 0);
+            else send(c, notokmsg, sizeof(notokmsg)-1, 0);
         }
         if (strstr(buffer, "GET /test_premature_disconnect"))
             trace("closing connection\n");
@@ -2213,7 +2213,7 @@ static DWORD CALLBACK server_thread(LPVOID param)
 static void test_basic_request(int port, const char *verb, const char *url)
 {
     HINTERNET hi, hc, hr;
-    DWORD r, count;
+    DWORD r, count, error;
     char buffer[0x100];
 
     hi = InternetOpenA(NULL, INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
@@ -2225,7 +2225,10 @@ static void test_basic_request(int port, const char *verb, const char *url)
     hr = HttpOpenRequestA(hc, verb, url, NULL, NULL, NULL, 0, 0);
     ok(hr != NULL, "HttpOpenRequest failed\n");
 
+    SetLastError(0xdeadbeef);
     r = HttpSendRequestA(hr, NULL, 0, NULL, 0);
+    error = GetLastError();
+    ok(error == ERROR_SUCCESS || broken(error != ERROR_SUCCESS), "expected ERROR_SUCCESS, got %u\n", error);
     ok(r, "HttpSendRequest failed\n");
 
     count = 0;
@@ -2235,32 +2238,6 @@ static void test_basic_request(int port, const char *verb, const char *url)
     ok(r, "InternetReadFile failed %u\n", GetLastError());
     ok(count == sizeof page1 - 1, "count was wrong\n");
     ok(!memcmp(buffer, page1, sizeof page1), "http data wrong, got: %s\n", buffer);
-
-    InternetCloseHandle(hr);
-    InternetCloseHandle(hc);
-    InternetCloseHandle(hi);
-}
-
-static void test_last_error(int port)
-{
-    HINTERNET hi, hc, hr;
-    DWORD error;
-    BOOL r;
-
-    hi = InternetOpenA(NULL, INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
-    ok(hi != NULL, "open failed\n");
-
-    hc = InternetConnectA(hi, "localhost", port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
-    ok(hc != NULL, "connect failed\n");
-
-    hr = HttpOpenRequestA(hc, NULL, "/test1", NULL, NULL, NULL, 0, 0);
-    ok(hr != NULL, "HttpOpenRequest failed\n");
-
-    SetLastError(0xdeadbeef);
-    r = HttpSendRequestA(hr, NULL, 0, NULL, 0);
-    error = GetLastError();
-    ok(r, "HttpSendRequest failed\n");
-    ok(error == ERROR_SUCCESS || broken(error != ERROR_SUCCESS), "expected ERROR_SUCCESS, got %u\n", error);
 
     InternetCloseHandle(hr);
     InternetCloseHandle(hc);
@@ -3078,12 +3055,17 @@ static void test_no_content(int port)
     CHECK_NOTIFIED(INTERNET_STATUS_REQUEST_SENT);
     CHECK_NOTIFIED(INTERNET_STATUS_RECEIVING_RESPONSE);
     CHECK_NOTIFIED(INTERNET_STATUS_RESPONSE_RECEIVED);
-    CHECK_NOTIFIED(INTERNET_STATUS_CLOSING_CONNECTION);
-    CHECK_NOTIFIED(INTERNET_STATUS_CONNECTION_CLOSED);
     CHECK_NOTIFIED(INTERNET_STATUS_REQUEST_COMPLETE);
 
     close_async_handle(session, hCompleteEvent, 2);
     CloseHandle(hCompleteEvent);
+
+    /*
+     * The connection should be closed before closing handle. This is true for most
+     * wininet versions (including Wine), but some old win2k versions fail to do that.
+     */
+    CHECK_NOTIFIED(INTERNET_STATUS_CLOSING_CONNECTION);
+    CHECK_NOTIFIED(INTERNET_STATUS_CONNECTION_CLOSED);
 }
 
 static void test_conn_close(int port)
@@ -3933,6 +3915,7 @@ static void test_cache_control_verb(int port)
     ret = HttpSendRequestA(request, NULL, 0, NULL, 0);
     ok(ret, "HttpSendRequest failed %u\n", GetLastError());
     test_status_code(request, 200);
+    InternetCloseHandle(request);
 
     request = HttpOpenRequestA(connect, "POST", "/test_cache_control_verb", NULL, NULL, NULL,
                               INTERNET_FLAG_NO_CACHE_WRITE, 0);
@@ -3940,6 +3923,7 @@ static void test_cache_control_verb(int port)
     ret = HttpSendRequestA(request, NULL, 0, NULL, 0);
     ok(ret, "HttpSendRequest failed %u\n", GetLastError());
     test_status_code(request, 200);
+    InternetCloseHandle(request);
 
     request = HttpOpenRequestA(connect, "HEAD", "/test_cache_control_verb", NULL, NULL, NULL,
                               INTERNET_FLAG_NO_CACHE_WRITE, 0);
@@ -3947,6 +3931,7 @@ static void test_cache_control_verb(int port)
     ret = HttpSendRequestA(request, NULL, 0, NULL, 0);
     ok(ret, "HttpSendRequest failed %u\n", GetLastError());
     test_status_code(request, 200);
+    InternetCloseHandle(request);
 
     request = HttpOpenRequestA(connect, "GET", "/test_cache_control_verb", NULL, NULL, NULL,
                               INTERNET_FLAG_NO_CACHE_WRITE, 0);
@@ -3954,8 +3939,8 @@ static void test_cache_control_verb(int port)
     ret = HttpSendRequestA(request, NULL, 0, NULL, 0);
     ok(ret, "HttpSendRequest failed %u\n", GetLastError());
     test_status_code(request, 200);
-
     InternetCloseHandle(request);
+
     InternetCloseHandle(connect);
     InternetCloseHandle(session);
 }
@@ -3994,7 +3979,6 @@ static void test_http_connection(void)
     test_response_without_headers(si.port);
     test_HttpQueryInfo(si.port);
     test_HttpSendRequestW(si.port);
-    test_last_error(si.port);
     test_options(si.port);
     test_no_content(si.port);
     test_conn_close(si.port);
@@ -4029,9 +4013,9 @@ typedef struct {
 } cert_struct_test_t;
 
 static const cert_struct_test_t test_winehq_org_cert = {
-    "0mJuv1t-1CFypQkyTZwfvjHHBAbnUndG\r\n"
+    "6JcR7G3G8tgjkeoMcitK-bTbzcpumDSy\r\n"
     "GT98380011\r\n"
-    "See www.rapidssl.com/resources/cps (c)13\r\n"
+    "See www.rapidssl.com/resources/cps (c)14\r\n"
     "Domain Control Validated - RapidSSL(R)\r\n"
     "*.winehq.org",
 

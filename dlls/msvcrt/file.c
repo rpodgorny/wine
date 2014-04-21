@@ -208,6 +208,21 @@ static void msvcrt_stat64_to_stat64i32(const struct MSVCRT__stat64 *buf64, struc
     buf->st_ctime = buf64->st_ctime;
 }
 
+static void msvcrt_stat64_to_stat32i64(const struct MSVCRT__stat64 *buf64, struct MSVCRT__stat32i64 *buf)
+{
+    buf->st_dev   = buf64->st_dev;
+    buf->st_ino   = buf64->st_ino;
+    buf->st_mode  = buf64->st_mode;
+    buf->st_nlink = buf64->st_nlink;
+    buf->st_uid   = buf64->st_uid;
+    buf->st_gid   = buf64->st_gid;
+    buf->st_rdev  = buf64->st_rdev;
+    buf->st_size  = buf64->st_size;
+    buf->st_atime = buf64->st_atime;
+    buf->st_mtime = buf64->st_mtime;
+    buf->st_ctime = buf64->st_ctime;
+}
+
 static void time_to_filetime( MSVCRT___time64_t time, FILETIME *ft )
 {
     /* 1601 to 1970 is 369 years plus 89 leap days */
@@ -713,7 +728,7 @@ int CDECL MSVCRT__access(const char *filename, int mode)
 /*********************************************************************
  *		_access_s (MSVCRT.@)
  */
-int CDECL _access_s(const char *filename, int mode)
+int CDECL MSVCRT__access_s(const char *filename, int mode)
 {
   if (!MSVCRT_CHECK_PMT(filename != NULL)) return *MSVCRT__errno();
   if (!MSVCRT_CHECK_PMT((mode & ~(MSVCRT_R_OK | MSVCRT_W_OK)) == 0)) return *MSVCRT__errno();
@@ -748,7 +763,7 @@ int CDECL MSVCRT__waccess(const MSVCRT_wchar_t *filename, int mode)
 /*********************************************************************
  *		_waccess_s (MSVCRT.@)
  */
-int CDECL _waccess_s(const MSVCRT_wchar_t *filename, int mode)
+int CDECL MSVCRT__waccess_s(const MSVCRT_wchar_t *filename, int mode)
 {
   if (!MSVCRT_CHECK_PMT(filename != NULL)) return *MSVCRT__errno();
   if (!MSVCRT_CHECK_PMT((mode & ~(MSVCRT_R_OK | MSVCRT_W_OK)) == 0)) return *MSVCRT__errno();
@@ -1613,8 +1628,10 @@ int CDECL MSVCRT__fstat(int fd, struct MSVCRT__stat* buf)
   return ret;
 }
 
-/* _fstat32 - not exported in native msvcrt */
-int CDECL _fstat32(int fd, struct MSVCRT__stat32* buf)
+/*********************************************************************
+ *		_fstat32 (MSVCR80.@)
+ */
+int CDECL MSVCRT__fstat32(int fd, struct MSVCRT__stat32* buf)
 {
     int ret;
     struct MSVCRT__stat64 buf64;
@@ -1625,8 +1642,10 @@ int CDECL _fstat32(int fd, struct MSVCRT__stat32* buf)
     return ret;
 }
 
-/* _fstat64i32 - not exported in native msvcrt */
-int CDECL _fstat64i32(int fd, struct MSVCRT__stat64i32* buf)
+/*********************************************************************
+ *		_fstat64i32 (MSVCR80.@)
+ */
+int CDECL MSVCRT__fstat64i32(int fd, struct MSVCRT__stat64i32* buf)
 {
     int ret;
     struct MSVCRT__stat64 buf64;
@@ -2781,13 +2800,56 @@ int CDECL MSVCRT_stati64(const char* path, struct MSVCRT__stati64 * buf)
  *		_stat (MSVCRT.@)
  */
 int CDECL MSVCRT_stat(const char* path, struct MSVCRT__stat * buf)
-{ int ret;
+{
+  int ret;
   struct MSVCRT__stat64 buf64;
 
   ret = MSVCRT_stat64( path, &buf64);
   if (!ret)
       msvcrt_stat64_to_stat(&buf64, buf);
   return ret;
+}
+
+/*********************************************************************
+ *  _stat32 (MSVCR100.@)
+ */
+int CDECL MSVCRT__stat32(const char *path, struct MSVCRT__stat32 *buf)
+{
+    int ret;
+    struct MSVCRT__stat64 buf64;
+
+    ret = MSVCRT_stat64(path, &buf64);
+    if (!ret)
+        msvcrt_stat64_to_stat32(&buf64, buf);
+    return ret;
+}
+
+/*********************************************************************
+ *  _stat32i64 (MSVCR100.@)
+ */
+int CDECL MSVCRT__stat32i64(const char *path, struct MSVCRT__stat32i64 *buf)
+{
+    int ret;
+    struct MSVCRT__stat64 buf64;
+
+    ret = MSVCRT_stat64(path, &buf64);
+    if (!ret)
+        msvcrt_stat64_to_stat32i64(&buf64, buf);
+    return ret;
+}
+
+/*********************************************************************
+ * _stat64i32 (MSVCR100.@)
+ */
+int CDECL MSVCRT__stat64i32(const char* path, struct MSVCRT__stat64i32 *buf)
+{
+    int ret;
+    struct MSVCRT__stat64 buf64;
+
+    ret = MSVCRT_stat64(path, &buf64);
+    if (!ret)
+        msvcrt_stat64_to_stat64i32(&buf64, buf);
+    return ret;
 }
 
 /*********************************************************************
@@ -2885,6 +2947,48 @@ int CDECL MSVCRT__wstat(const MSVCRT_wchar_t* path, struct MSVCRT__stat * buf)
   ret = MSVCRT__wstat64( path, &buf64 );
   if (!ret) msvcrt_stat64_to_stat(&buf64, buf);
   return ret;
+}
+
+/*********************************************************************
+ *  _wstat32 (MSVCR100.@)
+ */
+int CDECL MSVCRT__wstat32(const MSVCRT_wchar_t *path, struct MSVCRT__stat32 *buf)
+{
+    int ret;
+    struct MSVCRT__stat64 buf64;
+
+    ret = MSVCRT__wstat64(path, &buf64);
+    if (!ret)
+        msvcrt_stat64_to_stat32(&buf64, buf);
+    return ret;
+}
+
+/*********************************************************************
+ *  _wstat32i64 (MSVCR100.@)
+ */
+int CDECL MSVCRT__wstat32i64(const MSVCRT_wchar_t *path, struct MSVCRT__stat32i64 *buf)
+{
+    int ret;
+    struct MSVCRT__stat64 buf64;
+
+    ret = MSVCRT__wstat64(path, &buf64);
+    if (!ret)
+        msvcrt_stat64_to_stat32i64(&buf64, buf);
+    return ret;
+}
+
+/*********************************************************************
+ * _wstat64i32 (MSVCR100.@)
+ */
+int CDECL MSVCRT__wstat64i32(const MSVCRT_wchar_t *path, struct MSVCRT__stat64i32 *buf)
+{
+    int ret;
+    struct MSVCRT__stat64 buf64;
+
+    ret = MSVCRT__wstat64(path, &buf64);
+    if (!ret)
+        msvcrt_stat64_to_stat64i32(&buf64, buf);
+    return ret;
 }
 
 /*********************************************************************
@@ -3876,8 +3980,10 @@ MSVCRT_size_t CDECL MSVCRT_fread(void *ptr, MSVCRT_size_t size, MSVCRT_size_t nm
 }
 
 
-/* fread_s - not exported in native msvcrt */
-MSVCRT_size_t CDECL fread_s(void *buf, MSVCRT_size_t buf_size, MSVCRT_size_t elem_size,
+/*********************************************************************
+ *		fread_s (MSVCR80.@)
+ */
+MSVCRT_size_t CDECL MSVCRT_fread_s(void *buf, MSVCRT_size_t buf_size, MSVCRT_size_t elem_size,
         MSVCRT_size_t count, MSVCRT_FILE *stream)
 {
     size_t bytes_left, buf_pos;

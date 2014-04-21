@@ -19,6 +19,7 @@
 Option Explicit
 
 dim x, y, z
+Dim obj
 
 call ok(true, "true is not true?")
 ok true, "true is not true?"
@@ -223,6 +224,10 @@ if false then :
 if false then x = y : if true then call ok(false, "embedded if called")
 
 if false then x=1 else x=2 end if
+
+x = false
+if false then x = true : x = true
+Call ok(x = false, "x <> false")
 
 if false then
     ok false, "if false called"
@@ -482,6 +487,17 @@ next
 Call ok(y = 1, "y = " & y)
 Call ok(x = 2, "x = " & x)
 
+Set obj = collectionObj
+Call obj.reset()
+y = 0
+x = 10
+for each x in obj
+    y = y+1
+    Call ok(x = y, "x <> y")
+next
+Call ok(y = 3, "y = " & y)
+Call ok(getVT(x) = "VT_EMPTY*", "getVT(x) = " & getVT(x))
+
 x = false
 select case 3
     case 2
@@ -537,6 +553,22 @@ end select
 
 select case 0
 end select
+
+x = false
+select case 2
+    case 3,1,2,4: x = true
+    case 5,6,7
+        Call ok(false, "unexpected case")
+end select
+Call ok(x, "wrong case")
+
+x = false
+select case 2: case 5,6,7: Call ok(false, "unexpected case")
+    case 2,1,2,4
+        x = true
+    case else: Call ok(false, "unexpected case else")
+end select
+Call ok(x, "wrong case")
 
 if false then
 Sub testsub
@@ -747,7 +779,6 @@ Stop
 set x = testObj
 Call ok(getVT(x) = "VT_DISPATCH*", "getVT(x=testObj) = " & getVT(x))
 
-Dim obj
 Set obj = New EmptyClass
 Call ok(getVT(obj) = "VT_DISPATCH*", "getVT(obj) = " & getVT(obj))
 
@@ -814,6 +845,9 @@ Class TestClass
     Public Sub Class_Initialize
         publicProp2 = 2
         privateProp = true
+        Call ok(getVT(privateProp) = "VT_BOOL*", "getVT(privateProp) = " & getVT(privateProp))
+        Call ok(getVT(publicProp2) = "VT_I2*", "getVT(publicProp2) = " & getVT(publicProp2))
+        Call ok(getVT(Me.publicProp2) = "VT_I2", "getVT(Me.publicProp2) = " & getVT(Me.publicProp2))
     End Sub
 End Class
 
@@ -830,6 +864,7 @@ Call obj.publicFunction()
 
 Call ok(getVT(obj.publicProp) = "VT_EMPTY", "getVT(obj.publicProp) = " & getVT(obj.publicProp))
 obj.publicProp = 3
+Call ok(getVT(obj.publicProp) = "VT_I2", "getVT(obj.publicProp) = " & getVT(obj.publicProp))
 Call ok(obj.publicProp = 3, "obj.publicProp = " & obj.publicProp)
 obj.publicProp() = 3
 
@@ -1043,5 +1078,70 @@ next
 
 x=1
 Call ok(forarr(x) = 2, "forarr(x) = " & forarr(x))
+
+Class ArrClass
+    Dim classarr(3)
+    Dim classnoarr()
+    Dim var
+
+    Private Sub Class_Initialize
+        Call ok(getVT(classarr) = "VT_ARRAY|VT_BYREF|VT_VARIANT*", "getVT(classarr) = " & getVT(classarr))
+        Call testArray(-1, classnoarr)
+        classarr(0) = 1
+        classarr(1) = 2
+        classarr(2) = 3
+        classarr(3) = 4
+    End Sub
+
+    Public Sub testVarVT
+        Call ok(getVT(var) = "VT_ARRAY|VT_VARIANT*", "getVT(var) = " & getVT(var))
+    End Sub
+End Class
+
+Set obj = new ArrClass
+Call ok(getVT(obj.classarr) = "VT_ARRAY|VT_VARIANT", "getVT(obj.classarr) = " & getVT(obj.classarr))
+'todo_wine Call ok(obj.classarr(1) = 2, "obj.classarr(1) = " & obj.classarr(1))
+
+obj.var = arr
+Call ok(getVT(obj.var) = "VT_ARRAY|VT_VARIANT", "getVT(obj.var) = " & getVT(obj.var))
+Call obj.testVarVT
+
+Sub arrarg(byref refarr, byval valarr, byref refarr2, byval valarr2)
+    Call ok(getVT(refarr) = "VT_ARRAY|VT_BYREF|VT_VARIANT*", "getVT(refarr) = " & getVT(refarr))
+    Call ok(getVT(valarr) = "VT_ARRAY|VT_VARIANT*", "getVT(valarr) = " & getVT(valarr))
+    Call ok(getVT(refarr2) = "VT_ARRAY|VT_VARIANT*", "getVT(refarr2) = " & getVT(refarr2))
+    Call ok(getVT(valarr2) = "VT_ARRAY|VT_VARIANT*", "getVT(valarr2) = " & getVT(valarr2))
+End Sub
+
+Call arrarg(arr, arr, obj.classarr, obj.classarr)
+
+Sub arrarg2(byref refarr(), byval valarr(), byref refarr2(), byval valarr2())
+    Call ok(getVT(refarr) = "VT_ARRAY|VT_BYREF|VT_VARIANT*", "getVT(refarr) = " & getVT(refarr))
+    Call ok(getVT(valarr) = "VT_ARRAY|VT_VARIANT*", "getVT(valarr) = " & getVT(valarr))
+    Call ok(getVT(refarr2) = "VT_ARRAY|VT_VARIANT*", "getVT(refarr2) = " & getVT(refarr2))
+    Call ok(getVT(valarr2) = "VT_ARRAY|VT_VARIANT*", "getVT(valarr2) = " & getVT(valarr2))
+End Sub
+
+Call arrarg2(arr, arr, obj.classarr, obj.classarr)
+
+Sub testarrarg(arg(), vt)
+    Call ok(getVT(arg) = vt, "getVT() = " & getVT(arg) & " expected " & vt)
+End Sub
+
+Call testarrarg(1, "VT_I2*")
+Call testarrarg(false, "VT_BOOL*")
+Call testarrarg(Empty, "VT_EMPTY*")
+
+' It's allowed to declare non-builtin RegExp class...
+class RegExp
+     public property get Global()
+         Call ok(false, "Global called")
+         Global = "fail"
+     end property
+end class
+
+' ...but there is no way to use it because builtin instance is always created
+set x = new RegExp
+Call ok(x.Global = false, "x.Global = " & x.Global)
 
 reportSuccess()

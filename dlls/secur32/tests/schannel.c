@@ -518,7 +518,7 @@ static void test_remote_cert(PCCERT_CONTEXT remote_cert)
         cert_cnt++;
     }
 
-    ok(cert_cnt == 3, "cert_cnt = %u\n", cert_cnt);
+    ok(cert_cnt == 2, "cert_cnt = %u\n", cert_cnt);
     ok(incl_remote, "context does not contain cert itself\n");
 }
 
@@ -809,7 +809,8 @@ todo_wine
     status = pQueryContextAttributesA(&context, SECPKG_ATTR_CONNECTION_INFO, (void*)&conn_info);
     ok(status == SEC_E_OK, "QueryContextAttributesW(SECPKG_ATTR_CONNECTION_INFO) failed: %08x\n", status);
     if(status == SEC_E_OK) {
-        ok(conn_info.dwCipherStrength == 128, "conn_info.dwCipherStrength = %d\n", conn_info.dwCipherStrength);
+        ok(conn_info.dwCipherStrength == 128 || conn_info.dwCipherStrength == 168,
+           "conn_info.dwCipherStrength = %d\n", conn_info.dwCipherStrength);
         ok(conn_info.dwHashStrength >= 128, "conn_info.dwHashStrength = %d\n", conn_info.dwHashStrength);
     }
 

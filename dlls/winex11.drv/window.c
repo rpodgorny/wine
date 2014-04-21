@@ -314,7 +314,6 @@ static int get_window_attributes( struct x11drv_win_data *data, XSetWindowAttrib
     attr->colormap          = data->colormap ? data->colormap : default_colormap;
     attr->save_under        = ((GetClassLongW( data->hwnd, GCL_STYLE ) & CS_SAVEBITS) != 0);
     attr->bit_gravity       = NorthWestGravity;
-    attr->win_gravity       = StaticGravity;
     attr->backing_store     = NotUseful;
     attr->border_pixel      = 0;
     attr->event_mask        = (ExposureMask | PointerMotionMask |
@@ -1378,6 +1377,13 @@ Window create_client_window( struct x11drv_win_data *data, const XVisualInfo *vi
     int cx = min( max( 1, data->client_rect.right - data->client_rect.left ), 65535 );
     int cy = min( max( 1, data->client_rect.bottom - data->client_rect.top ), 65535 );
 
+    if (data->client_window)
+    {
+        XDeleteContext( data->display, data->client_window, winContext );
+        XDestroyWindow( data->display, data->client_window );
+    }
+
+    if (data->colormap) XFreeColormap( data->display, data->colormap );
     data->colormap = XCreateColormap( data->display, root_window, visual->visual,
                                       (visual->class == PseudoColor ||
                                        visual->class == GrayScale ||
@@ -1963,10 +1969,8 @@ void CDECL X11DRV_GetDC( HDC hdc, HWND hwnd, HWND top, const RECT *win_rect,
     struct x11drv_escape_set_drawable escape;
     HWND parent;
 
-    escape.code        = X11DRV_SET_DRAWABLE;
-    escape.hwnd        = hwnd;
-    escape.mode        = IncludeInferiors;
-    escape.fbconfig_id = 0;
+    escape.code = X11DRV_SET_DRAWABLE;
+    escape.mode = IncludeInferiors;
 
     escape.dc_rect.left         = win_rect->left - top_rect->left;
     escape.dc_rect.top          = win_rect->top - top_rect->top;
@@ -2012,12 +2016,10 @@ void CDECL X11DRV_ReleaseDC( HWND hwnd, HDC hdc )
     struct x11drv_escape_set_drawable escape;
 
     escape.code = X11DRV_SET_DRAWABLE;
-    escape.hwnd = GetDesktopWindow();
     escape.drawable = root_window;
     escape.mode = IncludeInferiors;
     escape.dc_rect = get_virtual_screen_rect();
     OffsetRect( &escape.dc_rect, -2 * escape.dc_rect.left, -2 * escape.dc_rect.top );
-    escape.fbconfig_id = 0;
     ExtEscape( hdc, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
 }
 

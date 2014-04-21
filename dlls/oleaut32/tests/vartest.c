@@ -24,6 +24,7 @@
 #include <math.h>
 #include <float.h>
 
+#define COBJMACROS
 #define CONST_VTABLE
 
 #include "windef.h"
@@ -95,6 +96,198 @@ static BOOL has_i8;
 #define R4_MIN FLT_MIN
 #define R8_MAX DBL_MAX
 #define R8_MIN DBL_MIN
+
+typedef struct IRecordInfoImpl
+{
+    IRecordInfo IRecordInfo_iface;
+    LONG ref;
+    unsigned int recordclear;
+    unsigned int getsize;
+    unsigned int recordcopy;
+    struct __tagBRECORD *rec;
+} IRecordInfoImpl;
+
+static inline IRecordInfoImpl *impl_from_IRecordInfo(IRecordInfo *iface)
+{
+    return CONTAINING_RECORD(iface, IRecordInfoImpl, IRecordInfo_iface);
+}
+
+static HRESULT WINAPI RecordInfo_QueryInterface(IRecordInfo *iface, REFIID riid, void **obj)
+{
+    *obj = NULL;
+
+    if (IsEqualIID(riid, &IID_IUnknown) ||
+        IsEqualIID(riid, &IID_IRecordInfo))
+    {
+        *obj = iface;
+        IRecordInfo_AddRef(iface);
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI RecordInfo_AddRef(IRecordInfo *iface)
+{
+    IRecordInfoImpl* This = impl_from_IRecordInfo(iface);
+    return InterlockedIncrement(&This->ref);
+}
+
+static ULONG WINAPI RecordInfo_Release(IRecordInfo *iface)
+{
+    IRecordInfoImpl* This = impl_from_IRecordInfo(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    if (!ref)
+        HeapFree(GetProcessHeap(), 0, This);
+
+    return ref;
+}
+
+static HRESULT WINAPI RecordInfo_RecordInit(IRecordInfo *iface, PVOID pvNew)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_RecordClear(IRecordInfo *iface, void *data)
+{
+    IRecordInfoImpl* This = impl_from_IRecordInfo(iface);
+    This->recordclear++;
+    This->rec->pvRecord = NULL;
+    return S_OK;
+}
+
+static HRESULT WINAPI RecordInfo_RecordCopy(IRecordInfo *iface, void *src, void *dest)
+{
+    IRecordInfoImpl* This = impl_from_IRecordInfo(iface);
+    This->recordcopy++;
+    ok(src == (void*)0xdeadbeef, "wrong src pointer %p\n", src);
+    return S_OK;
+}
+
+static HRESULT WINAPI RecordInfo_GetGuid(IRecordInfo *iface, GUID *pguid)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_GetName(IRecordInfo *iface, BSTR *pbstrName)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_GetSize(IRecordInfo *iface, ULONG* size)
+{
+    IRecordInfoImpl* This = impl_from_IRecordInfo(iface);
+    This->getsize++;
+    *size = 0;
+    return S_OK;
+}
+
+static HRESULT WINAPI RecordInfo_GetTypeInfo(IRecordInfo *iface, ITypeInfo **ppTypeInfo)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_GetField(IRecordInfo *iface, PVOID pvData,
+                                                LPCOLESTR szFieldName, VARIANT *pvarField)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_GetFieldNoCopy(IRecordInfo *iface, PVOID pvData,
+                            LPCOLESTR szFieldName, VARIANT *pvarField, PVOID *ppvDataCArray)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_PutField(IRecordInfo *iface, ULONG wFlags, PVOID pvData,
+                                            LPCOLESTR szFieldName, VARIANT *pvarField)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_PutFieldNoCopy(IRecordInfo *iface, ULONG wFlags,
+                PVOID pvData, LPCOLESTR szFieldName, VARIANT *pvarField)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_GetFieldNames(IRecordInfo *iface, ULONG *pcNames,
+                                                BSTR *rgBstrNames)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static BOOL WINAPI RecordInfo_IsMatchingType(IRecordInfo *iface, IRecordInfo *info2)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static PVOID WINAPI RecordInfo_RecordCreate(IRecordInfo *iface)
+{
+    ok(0, "unexpected call\n");
+    return NULL;
+}
+
+static HRESULT WINAPI RecordInfo_RecordCreateCopy(IRecordInfo *iface, PVOID pvSource,
+                                                    PVOID *ppvDest)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_RecordDestroy(IRecordInfo *iface, PVOID pvRecord)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static const IRecordInfoVtbl RecordInfoVtbl =
+{
+    RecordInfo_QueryInterface,
+    RecordInfo_AddRef,
+    RecordInfo_Release,
+    RecordInfo_RecordInit,
+    RecordInfo_RecordClear,
+    RecordInfo_RecordCopy,
+    RecordInfo_GetGuid,
+    RecordInfo_GetName,
+    RecordInfo_GetSize,
+    RecordInfo_GetTypeInfo,
+    RecordInfo_GetField,
+    RecordInfo_GetFieldNoCopy,
+    RecordInfo_PutField,
+    RecordInfo_PutFieldNoCopy,
+    RecordInfo_GetFieldNames,
+    RecordInfo_IsMatchingType,
+    RecordInfo_RecordCreate,
+    RecordInfo_RecordCreateCopy,
+    RecordInfo_RecordDestroy
+};
+
+static IRecordInfoImpl *get_test_recordinfo(void)
+{
+    IRecordInfoImpl *rec;
+
+    rec = HeapAlloc(GetProcessHeap(), 0, sizeof(IRecordInfoImpl));
+    rec->IRecordInfo_iface.lpVtbl = &RecordInfoVtbl;
+    rec->ref = 1;
+    rec->recordclear = 0;
+    rec->getsize = 0;
+    rec->recordcopy = 0;
+
+    return rec;
+}
 
 static void init(void)
 {
@@ -349,14 +542,11 @@ static void _test_bstr_var(unsigned line, const VARIANT *v, const char *str)
 
 static void test_VariantInit(void)
 {
-  VARIANTARG v1, v2;
+  VARIANT v;
 
-  /* Test that VariantInit() only sets the type */
-  memset(&v1, -1, sizeof(v1));
-  v2 = v1;
-  V_VT(&v2) = VT_EMPTY;
-  VariantInit(&v1);
-  ok(!memcmp(&v1, &v2, sizeof(v1)), "VariantInit() set extra fields\n");
+  memset(&v, -1, sizeof(v));
+  VariantInit(&v);
+  ok(V_VT(&v) == VT_EMPTY, "VariantInit() returned vt %d\n", V_VT(&v));
 }
 
 /* All possible combinations of extra V_VT() flags */
@@ -441,6 +631,8 @@ static test_VariantClearImpl test_myVariantClearImpl = {{&test_VariantClear_vtbl
 
 static void test_VariantClear(void)
 {
+  struct __tagBRECORD *rec;
+  IRecordInfoImpl *recinfo;
   HRESULT hres;
   VARIANTARG v;
   VARIANT v2;
@@ -559,10 +751,28 @@ static void test_VariantClear(void)
   ok(V_DISPATCHREF(&v) == (IDispatch**)&punk, "dispatch ref %p\n", V_DISPATCHREF(&v));
   /* Check that nothing got called */
   ok(test_myVariantClearImpl.events ==  0, "Unexpected call. events %08x\n", test_myVariantClearImpl.events);
+
+  /* RECORD */
+  recinfo = get_test_recordinfo();
+  V_VT(&v) = VT_RECORD;
+  rec = &V_UNION(&v, brecVal);
+  rec->pRecInfo = &recinfo->IRecordInfo_iface;
+  rec->pvRecord = (void*)0xdeadbeef;
+  recinfo->recordclear = 0;
+  recinfo->ref = 2;
+  recinfo->rec = rec;
+  hres = VariantClear(&v);
+  ok(hres == S_OK, "ret %08x\n", hres);
+  ok(rec->pvRecord == NULL, "got %p\n", rec->pvRecord);
+  ok(recinfo->recordclear == 1, "got %d\n", recinfo->recordclear);
+  ok(recinfo->ref == 1, "got %d\n", recinfo->ref);
+  IRecordInfo_Release(&recinfo->IRecordInfo_iface);
 }
 
 static void test_VariantCopy(void)
 {
+  struct __tagBRECORD *rec;
+  IRecordInfoImpl *recinfo;
   VARIANTARG vSrc, vDst;
   VARTYPE vt;
   size_t i;
@@ -678,6 +888,33 @@ static void test_VariantCopy(void)
     }
     VariantClear(&vDst);
   }
+
+  /* copy RECORD */
+  recinfo = get_test_recordinfo();
+
+  memset(&vDst, 0, sizeof(vDst));
+  V_VT(&vDst) = VT_EMPTY;
+
+  V_VT(&vSrc) = VT_RECORD;
+  rec = &V_UNION(&vSrc, brecVal);
+  rec->pRecInfo = &recinfo->IRecordInfo_iface;
+  rec->pvRecord = (void*)0xdeadbeef;
+
+  recinfo->recordclear = 0;
+  recinfo->recordcopy = 0;
+  recinfo->getsize = 0;
+  recinfo->rec = rec;
+  hres = VariantCopy(&vDst, &vSrc);
+  ok(hres == S_OK, "ret %08x\n", hres);
+
+  rec = &V_UNION(&vDst, brecVal);
+  ok(rec->pvRecord != (void*)0xdeadbeef && rec->pvRecord != NULL, "got %p\n", rec->pvRecord);
+  ok(rec->pRecInfo == &recinfo->IRecordInfo_iface, "got %p\n", rec->pRecInfo);
+  ok(recinfo->getsize == 1, "got %d\n", recinfo->recordclear);
+  ok(recinfo->recordcopy == 1, "got %d\n", recinfo->recordclear);
+
+  VariantClear(&vDst);
+  VariantClear(&vSrc);
 }
 
 /* Determine if a vt is valid for VariantCopyInd() */
@@ -5763,10 +6000,10 @@ static void test_VarAnd(void)
     VARTYPE i;
     HRESULT hres;
 
+    CHECKPTR(VarAnd);
+
     true_str = SysAllocString(szTrue);
     false_str = SysAllocString(szFalse);
-
-    CHECKPTR(VarAnd);
 
     /* Test all possible flag/vt combinations & the resulting vt type */
     for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)
@@ -7242,10 +7479,10 @@ static void test_VarDiv(void)
     HRESULT hres;
     double r;
 
+    CHECKPTR(VarDiv);
+
     num1_str = SysAllocString(str1);
     num2_str = SysAllocString(str2);
-
-    CHECKPTR(VarDiv);
 
     /* Test all possible flag/vt combinations & the resulting vt type */
     for (i = 0; i < sizeof(ExtraFlags)/sizeof(ExtraFlags[0]); i++)

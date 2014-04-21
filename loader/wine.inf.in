@@ -121,8 +121,10 @@ AddService=Spooler,0,SpoolerService
 AddService=StiSvc,0,StiService
 AddService=TermService,0,TerminalServices
 AddService=PlugPlay,0,PlugPlayService
-AddService=FontCache3.0.0.0,0,FontCacheService
+AddService=FontCache3.0.0.0,0,WPFFontCacheService
 AddService=LanmanServer,0,LanmanServerService
+AddService=FontCache,0,FontCacheService
+AddService=Schedule,0,TaskSchedulerService
 
 [DefaultInstall.NT.Services]
 AddService=BITS,0,BITSService
@@ -132,8 +134,10 @@ AddService=Spooler,0,SpoolerService
 AddService=StiSvc,0,StiService
 AddService=TermService,0,TerminalServices
 AddService=PlugPlay,0,PlugPlayService
-AddService=FontCache3.0.0.0,0,FontCacheService
+AddService=FontCache3.0.0.0,0,WPFFontCacheService
 AddService=LanmanServer,0,LanmanServerService
+AddService=FontCache,0,FontCacheService
+AddService=Schedule,0,TaskSchedulerService
 
 [DefaultInstall.ntamd64.Services]
 AddService=BITS,0,BITSService
@@ -143,8 +147,10 @@ AddService=Spooler,0,SpoolerService
 AddService=StiSvc,0,StiService
 AddService=TermService,0,TerminalServices
 AddService=PlugPlay,0,PlugPlayService
-AddService=FontCache3.0.0.0,0,FontCacheService
+AddService=FontCache3.0.0.0,0,WPFFontCacheService
 AddService=LanmanServer,0,LanmanServerService
+AddService=FontCache,0,FontCacheService
+AddService=Schedule,0,TaskSchedulerService
 
 [Strings]
 MciExtStr="Software\Microsoft\Windows NT\CurrentVersion\MCI Extensions"
@@ -539,6 +545,7 @@ HKLM,%Control%\Session Manager\Environment,"TEMP",0x00020002,"%10%\temp"
 HKLM,%Control%\Session Manager\Environment,"TMP",0x00020002,"%10%\temp"
 HKLM,%Control%\Session Manager\Environment,"windir",0x00020000,"%10%"
 HKLM,%Control%\Session Manager\Environment,"winsysdir",,"%11%"
+HKLM,%Control%\Session Manager\Memory Management,PagingFiles,,"%24%\pagefile.sys 27 77"
 HKLM,%Control%\Session Manager\Memory Management,WriteWatch,0x00040002,1
 
 [Fonts]
@@ -2507,6 +2514,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 10,logs,
 10,temp,
 11,mui,
+11,tasks,
 11,spool\drivers\color,
 11,spool\printers,
 10,,explorer.exe
@@ -2539,6 +2547,9 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,wbem,wbemprox.dll
 11,wbem,wmic.exe
 11,wbem,wmiutils.dll
+; empty folders to make sure the parent dirs are not removed
+16410,Microsoft,
+16412,Microsoft,
 16422,Internet Explorer,iexplore.exe
 16427,System\OLE DB,oledb32.dll
 16427,System\OLE DB,msdaps.dll
@@ -2989,7 +3000,7 @@ ServiceType=32
 StartType=2
 ErrorControl=1
 
-[FontCacheService]
+[WPFFontCacheService]
 Description="Windows Presentation Foundation font cache service"
 DisplayName="Windows Presentation Foundation Font Cache 3.0.0.0"
 ServiceBinary="%10%\Microsoft.Net\Framework\v3.0\wpf\presentationfontcache.exe"
@@ -3009,6 +3020,32 @@ ErrorControl=1
 [LanmanServerServiceKeys]
 HKR,Parameters,"ServiceDll",,"%11%\srvsvc.dll"
 ;; HKLM,%CurrentVersionNT%\SvcHost,"netsvcs",0x00010008,"lanmanserver"
+
+[FontCacheService]
+AddReg=FontCacheServiceKeys
+Description="Windows Font Cache Service"
+DisplayName="Windows Font Cache Service"
+ServiceBinary="%11%\svchost.exe -k netsvcs"
+ServiceType=32
+StartType=3
+ErrorControl=1
+
+[FontCacheServiceKeys]
+HKR,Parameters,"ServiceDll",,"%11%\fntcache.dll"
+HKLM,%CurrentVersionNT%\SvcHost,"netsvcs",0x00010008,"fontcache"
+
+[TaskSchedulerService]
+AddReg=TaskSchedulerServiceKeys
+Description="Task Scheduler"
+DisplayName="Task Scheduler"
+ServiceBinary="%11%\svchost.exe -k netsvcs"
+ServiceType=32
+StartType=3
+ErrorControl=1
+
+[TaskSchedulerServiceKeys]
+HKR,Parameters,"ServiceDll",,"%11%\schedsvc.dll"
+HKLM,%CurrentVersionNT%\SvcHost,"netsvcs",0x00010008,"Schedule"
 
 [Services]
 HKLM,%CurrentVersion%\RunServices,"winemenubuilder",2,"%11%\winemenubuilder.exe -a -r"

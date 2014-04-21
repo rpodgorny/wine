@@ -261,6 +261,12 @@ static HRESULT WINAPI OleObject_QueryInterface(IOleObject *iface, REFIID riid, v
     }else if(IsEqualGUID(riid, &IID_IWMPPlayer4)) {
         TRACE("(%p)->(IID_IWMPPlayer4 %p)\n", This, ppv);
         *ppv = &This->IWMPPlayer4_iface;
+    }else if(IsEqualGUID(riid, &IID_IWMPSettings)) {
+        TRACE("(%p)->(IID_IWMPSettings %p)\n", This, ppv);
+        *ppv = &This->IWMPSettings_iface;
+    }else if(IsEqualGUID(riid, &IID_IOleControl)) {
+        TRACE("(%p)->(IID_IOleControl %p)\n", This, ppv);
+        *ppv = &This->IOleControl_iface;
     }else {
         FIXME("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
         *ppv = NULL;
@@ -396,6 +402,16 @@ static HRESULT WINAPI OleObject_DoVerb(IOleObject *iface, LONG iVerb, LPMSG lpms
     case OLEIVERB_INPLACEACTIVATE:
         TRACE("(%p)->(OLEIVERB_INPLACEACTIVATE)\n", This);
         return activate_inplace(This);
+
+    case OLEIVERB_HIDE:
+        if(!This->hwnd) {
+            FIXME("No window to hide\n");
+            return E_UNEXPECTED;
+        }
+
+        ShowWindow(This->hwnd, SW_HIDE);
+        return S_OK;
+
     default:
         FIXME("Unsupported iVerb %d\n", iVerb);
     }
@@ -586,8 +602,16 @@ static HRESULT WINAPI OleInPlaceObjectWindowless_SetObjectRects(IOleInPlaceObjec
         LPCRECT lprcPosRect, LPCRECT lprcClipRect)
 {
     WindowsMediaPlayer *This = impl_from_IOleInPlaceObjectWindowless(iface);
-    FIXME("(%p)->(%p %p)\n", This, lprcPosRect, lprcClipRect);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s %s)\n", This, wine_dbgstr_rect(lprcPosRect), wine_dbgstr_rect(lprcClipRect));
+
+    if(This->hwnd) {
+       SetWindowPos(This->hwnd, NULL, lprcPosRect->left, lprcPosRect->top,
+               lprcPosRect->right-lprcPosRect->left, lprcPosRect->bottom-lprcPosRect->top,
+               SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI OleInPlaceObjectWindowless_ReactivateAndUndo(IOleInPlaceObjectWindowless *iface)
@@ -625,6 +649,67 @@ static const IOleInPlaceObjectWindowlessVtbl OleInPlaceObjectWindowlessVtbl = {
     OleInPlaceObjectWindowless_ReactivateAndUndo,
     OleInPlaceObjectWindowless_OnWindowMessage,
     OleInPlaceObjectWindowless_GetDropTarget
+};
+
+static inline WindowsMediaPlayer *impl_from_IOleControl(IOleControl *iface)
+{
+    return CONTAINING_RECORD(iface, WindowsMediaPlayer, IOleControl_iface);
+}
+
+static HRESULT WINAPI OleControl_QueryInterface(IOleControl *iface, REFIID riid, void **ppv)
+{
+    WindowsMediaPlayer *This = impl_from_IOleControl(iface);
+    return IOleObject_QueryInterface(&This->IOleObject_iface, riid, ppv);
+}
+
+static ULONG WINAPI OleControl_AddRef(IOleControl *iface)
+{
+    WindowsMediaPlayer *This = impl_from_IOleControl(iface);
+    return IOleObject_AddRef(&This->IOleObject_iface);
+}
+
+static ULONG WINAPI OleControl_Release(IOleControl *iface)
+{
+    WindowsMediaPlayer *This = impl_from_IOleControl(iface);
+    return IOleObject_AddRef(&This->IOleObject_iface);
+}
+
+static HRESULT WINAPI OleControl_GetControlInfo(IOleControl *iface, CONTROLINFO *pCI)
+{
+    WindowsMediaPlayer *This = impl_from_IOleControl(iface);
+    FIXME("(%p)->(%p)\n", This, pCI);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI OleControl_OnMnemonic(IOleControl *iface, MSG *msg)
+{
+    WindowsMediaPlayer *This = impl_from_IOleControl(iface);
+    FIXME("(%p)->(%p)\n", This, msg);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI OleControl_OnAmbientPropertyChange(IOleControl *iface, DISPID dispID)
+{
+    WindowsMediaPlayer *This = impl_from_IOleControl(iface);
+    FIXME("(%p)->(%d)\n", This, dispID);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI OleControl_FreezeEvents(IOleControl *iface, BOOL freeze)
+{
+    WindowsMediaPlayer *This = impl_from_IOleControl(iface);
+    FIXME("(%p)->(%x)\n", This, freeze);
+    return E_NOTIMPL;
+}
+
+static const IOleControlVtbl OleControlVtbl = {
+    OleControl_QueryInterface,
+    OleControl_AddRef,
+    OleControl_Release,
+    OleControl_GetControlInfo,
+    OleControl_OnMnemonic,
+    OleControl_OnAmbientPropertyChange,
+    OleControl_FreezeEvents
 };
 
 static inline WindowsMediaPlayer *impl_from_IProvideClassInfo2(IProvideClassInfo2 *iface)
@@ -744,8 +829,15 @@ static HRESULT WINAPI PersistStreamInit_GetSizeMax(IPersistStreamInit *iface,
 static HRESULT WINAPI PersistStreamInit_InitNew(IPersistStreamInit *iface)
 {
     WindowsMediaPlayer *This = impl_from_IPersistStreamInit(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)\n", This);
+
+    if(!This->client_site)
+        return E_FAIL;
+
+    /* Nothing to do, yet. */
+    get_container_hwnd(This);
+    return S_OK;
 }
 
 static const IPersistStreamInitVtbl PersistStreamInitVtbl = {
@@ -826,6 +918,7 @@ HRESULT WINAPI WMPFactory_CreateInstance(IClassFactory *iface, IUnknown *outer,
     wmp->IPersistStreamInit_iface.lpVtbl = &PersistStreamInitVtbl;
     wmp->IOleInPlaceObjectWindowless_iface.lpVtbl = &OleInPlaceObjectWindowlessVtbl;
     wmp->IConnectionPointContainer_iface.lpVtbl = &ConnectionPointContainerVtbl;
+    wmp->IOleControl_iface.lpVtbl = &OleControlVtbl;
 
     wmp->ref = 1;
 

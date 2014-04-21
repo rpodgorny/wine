@@ -36,8 +36,8 @@ static ULONG WINAPI IDirectMusicContainerImpl_IPersistStream_AddRef (LPPERSISTST
  */
 /* IUnknown/IDirectMusicContainer part: */
 
-static HRESULT DMUSIC_DestroyDirectMusicContainerImpl (LPDIRECTMUSICCONTAINER iface) {
-	ICOM_THIS_MULTI(IDirectMusicContainerImpl, ContainerVtbl, iface);
+static HRESULT destroy_dmcontainer(IDirectMusicContainerImpl *This)
+{
 	LPDIRECTMUSICLOADER pLoader;
 	LPDIRECTMUSICGETLOADER pGetLoader;
 	struct list *pEntry;
@@ -68,7 +68,6 @@ static HRESULT DMUSIC_DestroyDirectMusicContainerImpl (LPDIRECTMUSICCONTAINER if
 	IStream_Release (This->pStream);
 
 	/* FIXME: release allocated entries */
-	unlock_module();
 
 	return S_OK;
 }
@@ -108,8 +107,10 @@ static ULONG WINAPI IDirectMusicContainerImpl_IDirectMusicContainer_Release (LPD
 	DWORD dwRef = InterlockedDecrement (&This->dwRef);
 	TRACE("(%p): ReleaseRef to %d\n", This, dwRef);
 	if (dwRef == 0) {
-		DMUSIC_DestroyDirectMusicContainerImpl (iface);
+                if (This->pStream)
+                        destroy_dmcontainer(This);
 		HeapFree(GetProcessHeap(), 0, This);
+                unlock_module();
 	}
 	
 	return dwRef;
@@ -909,7 +910,8 @@ static const IPersistStreamVtbl DirectMusicContainer_PersistStream_Vtbl = {
 };
 
 /* for ClassFactory */
-HRESULT WINAPI DMUSIC_CreateDirectMusicContainerImpl (LPCGUID lpcGUID, LPVOID* ppobj, LPUNKNOWN pUnkOuter) {
+HRESULT WINAPI create_dmcontainer(REFIID lpcGUID, void **ppobj)
+{
 	IDirectMusicContainerImpl* obj;
 
 	obj = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectMusicContainerImpl));

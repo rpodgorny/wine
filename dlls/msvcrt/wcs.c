@@ -40,13 +40,17 @@ static BOOL n_format_enabled = TRUE;
 #include "printf.h"
 #undef PRINTF_WIDE
 
-/* _get_printf_count_output - not exported in native msvcrt */
+/*********************************************************************
+ *		_get_printf_count_output (MSVCR80.@)
+ */
 int CDECL MSVCRT__get_printf_count_output( void )
 {
     return n_format_enabled ? 1 : 0;
 }
 
-/* _set_printf_count_output - not exported in native msvcrt */
+/*********************************************************************
+ *		_set_printf_count_output (MSVCR80.@)
+ */
 int CDECL MSVCRT__set_printf_count_output( int enable )
 {
     BOOL old = n_format_enabled;
@@ -860,6 +864,15 @@ int CDECL MSVCRT_vswprintf_p_l(MSVCRT_wchar_t *buffer, MSVCRT_size_t length,
 }
 
 /*********************************************************************
+ * _vswprintf_p (MSVCR100.@)
+ */
+int CDECL MSVCRT__vswprintf_p(MSVCRT_wchar_t *buffer, MSVCRT_size_t length,
+        const MSVCRT_wchar_t *format, __ms_va_list args)
+{
+    return MSVCRT_vswprintf_p_l(buffer, length, format, NULL, args);
+}
+
+/*********************************************************************
  *              _vsnwprintf_s_l (MSVCRT.@)
  */
 int CDECL MSVCRT_vsnwprintf_s_l( MSVCRT_wchar_t *str, MSVCRT_size_t sizeOfBuffer,
@@ -1088,6 +1101,14 @@ int CDECL MSVCRT__vscwprintf_p_l( const MSVCRT_wchar_t *format, MSVCRT__locale_t
 }
 
 /*********************************************************************
+ * _vscwprintf_p (MSVCR100.@)
+ */
+int CDECL MSVCRT__vscwprintf_p(const MSVCRT_wchar_t *format, __ms_va_list args)
+{
+    return MSVCRT_vswprintf_p_l(NULL, INT_MAX, format, NULL, args);
+}
+
+/*********************************************************************
  *		vswprintf_s (MSVCRT.@)
  */
 int CDECL MSVCRT_vswprintf_s(MSVCRT_wchar_t* str, MSVCRT_size_t numberOfElements,
@@ -1161,6 +1182,21 @@ int CDECL MSVCRT_sprintf_p_l(char *buffer, MSVCRT_size_t length,
 }
 
 /*********************************************************************
+ * _sprintf_p (MSVCR100.@)
+ */
+int CDECL MSVCRT__sprintf_p(char *buffer, MSVCRT_size_t length, const char *format, ...)
+{
+    __ms_va_list valist;
+    int r;
+
+    __ms_va_start(valist, format);
+    r = MSVCRT_vsprintf_p_l(buffer, length, format, NULL, valist);
+    __ms_va_end(valist);
+
+    return r;
+}
+
+/*********************************************************************
  *		_swprintf_p_l (MSVCRT.@)
  */
 int CDECL MSVCRT_swprintf_p_l(MSVCRT_wchar_t *buffer, MSVCRT_size_t length,
@@ -1219,7 +1255,7 @@ MSVCRT_wchar_t* CDECL MSVCRT_wcspbrk( const MSVCRT_wchar_t* str, const MSVCRT_wc
 /*********************************************************************
  *		wcstok_s  (MSVCRT.@)
  */
-MSVCRT_wchar_t * CDECL wcstok_s( MSVCRT_wchar_t *str, const MSVCRT_wchar_t *delim,
+MSVCRT_wchar_t * CDECL MSVCRT_wcstok_s( MSVCRT_wchar_t *str, const MSVCRT_wchar_t *delim,
                                  MSVCRT_wchar_t **next_token )
 {
     MSVCRT_wchar_t *ret;
@@ -1244,7 +1280,7 @@ MSVCRT_wchar_t * CDECL wcstok_s( MSVCRT_wchar_t *str, const MSVCRT_wchar_t *deli
  */
 MSVCRT_wchar_t * CDECL MSVCRT_wcstok( MSVCRT_wchar_t *str, const MSVCRT_wchar_t *delim )
 {
-    return wcstok_s(str, delim, &msvcrt_get_thread_data()->wcstok_next);
+    return MSVCRT_wcstok_s(str, delim, &msvcrt_get_thread_data()->wcstok_next);
 }
 
 /*********************************************************************
@@ -1946,7 +1982,7 @@ MSVCRT_wchar_t* CDECL MSVCRT_wcsstr(const MSVCRT_wchar_t *str, const MSVCRT_wcha
 /*********************************************************************
  *              _wtoi64_l (MSVCRT.@)
  */
-__int64 CDECL _wtoi64_l(const MSVCRT_wchar_t *str, MSVCRT__locale_t locale)
+__int64 CDECL MSVCRT__wtoi64_l(const MSVCRT_wchar_t *str, MSVCRT__locale_t locale)
 {
     ULONGLONG RunningTotal = 0;
     BOOL bMinus = FALSE;
@@ -1973,9 +2009,9 @@ __int64 CDECL _wtoi64_l(const MSVCRT_wchar_t *str, MSVCRT__locale_t locale)
 /*********************************************************************
  *              _wtoi64 (MSVCRT.@)
  */
-__int64 CDECL _wtoi64(const MSVCRT_wchar_t *str)
+__int64 CDECL MSVCRT__wtoi64(const MSVCRT_wchar_t *str)
 {
-    return _wtoi64_l(str, NULL);
+    return MSVCRT__wtoi64_l(str, NULL);
 }
 
 /*********************************************************************

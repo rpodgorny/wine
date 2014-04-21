@@ -91,6 +91,7 @@ DECL_WINELIB_TYPE_AW(WINSTAENUMPROC)
 
 
 typedef HANDLE HDWP;
+typedef void* HPOWERNOTIFY;
 
 #define UOI_FLAGS       1
 #define UOI_NAME        2
@@ -3219,6 +3220,27 @@ typedef struct
 #define     AnsiToOemBuffW CharToOemBuffW
 #define     AnsiToOemBuff WINELIB_NAME_AW(AnsiToOemBuff)
 
+/* ChangeWindowMessageFilter flags */
+#define  MSGFLT_ADD    1
+#define  MSGFLT_REMOVE 2
+
+/* ChangeWindowMessageFilterEx defines */
+#define  MSGFLTINFO_NONE                     0
+#define  MSGFLTINFO_ALREADYALLOWED_FORWND    1
+#define  MSGFLTINFO_ALREADYDISALLOWED_FORWND 2
+#define  MSGFLTINFO_ALLOWED_HIGHER           3
+
+typedef struct tagCHANGEFILTERSTRUCT
+{
+    DWORD cbSize;
+    DWORD ExtStatus;
+} CHANGEFILTERSTRUCT, *PCHANGEFILTERSTRUCT;
+
+/* Actions for ChangeWindowMessageFilterEx */
+#define  MSGFLT_RESET    0
+#define  MSGFLT_ALLOW    1
+#define  MSGFLT_DISALLOW 2
+
 #if defined(_WINGDI_) && !defined(NOGDI)
 WINUSERAPI LONG        WINAPI ChangeDisplaySettingsA(LPDEVMODEA,DWORD);
 WINUSERAPI LONG        WINAPI ChangeDisplaySettingsW(LPDEVMODEW,DWORD);
@@ -3293,6 +3315,8 @@ WINUSERAPI BOOL        WINAPI ChangeClipboardChain(HWND,HWND);
 WINUSERAPI BOOL        WINAPI ChangeMenuA(HMENU,UINT,LPCSTR,UINT,UINT);
 WINUSERAPI BOOL        WINAPI ChangeMenuW(HMENU,UINT,LPCWSTR,UINT,UINT);
 #define                       ChangeMenu WINELIB_NAME_AW(ChangeMenu)
+WINUSERAPI BOOL        WINAPI ChangeWindowMessageFilter(UINT,DWORD);
+WINUSERAPI BOOL        WINAPI ChangeWindowMessageFilterEx(HWND,UINT,DWORD,CHANGEFILTERSTRUCT*);
 WINUSERAPI LPSTR       WINAPI CharLowerA(LPSTR);
 WINUSERAPI LPWSTR      WINAPI CharLowerW(LPWSTR);
 #define                       CharLower WINELIB_NAME_AW(CharLower)
@@ -3830,6 +3854,7 @@ WINUSERAPI HDEVNOTIFY  WINAPI RegisterDeviceNotificationA(HANDLE,LPVOID,DWORD);
 WINUSERAPI HDEVNOTIFY  WINAPI RegisterDeviceNotificationW(HANDLE,LPVOID,DWORD);
 #define                       RegisterDeviceNotification WINELIB_NAME_AW(RegisterDeviceNotification)
 WINUSERAPI BOOL        WINAPI RegisterHotKey(HWND,INT,UINT,UINT);
+WINUSERAPI HPOWERNOTIFY WINAPI RegisterPowerSettingNotification(HANDLE,LPCGUID,DWORD);
 WINUSERAPI BOOL        WINAPI RegisterRawInputDevices(PRAWINPUTDEVICE,UINT,UINT);
 WINUSERAPI UINT        WINAPI RegisterWindowMessageA(LPCSTR);
 WINUSERAPI UINT        WINAPI RegisterWindowMessageW(LPCWSTR);

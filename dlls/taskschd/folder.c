@@ -25,14 +25,13 @@
 #include "winreg.h"
 #include "objbase.h"
 #include "taskschd.h"
+#include "schrpc.h"
 #include "taskschd_private.h"
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(taskschd);
-
-static const char root[] = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Schedule\\TaskCache\\Tree";
 
 typedef struct
 {
@@ -135,76 +134,6 @@ static HRESULT WINAPI TaskFolder_get_Name(ITaskFolder *iface, BSTR *name)
     return S_OK;
 }
 
-static HRESULT reg_create_folder(const WCHAR *path, HKEY *hfolder)
-{
-    HKEY hroot;
-    DWORD ret, disposition;
-
-    ret = RegCreateKeyA(HKEY_LOCAL_MACHINE, root, &hroot);
-    if (ret) return HRESULT_FROM_WIN32(ret);
-
-    while (*path == '\\') path++;
-    ret = RegCreateKeyExW(hroot, path, 0, NULL, 0, KEY_ALL_ACCESS, NULL, hfolder, &disposition);
-    if (ret == ERROR_FILE_NOT_FOUND)
-        ret = ERROR_PATH_NOT_FOUND;
-
-    if (ret == ERROR_SUCCESS && disposition == REG_OPENED_EXISTING_KEY)
-    {
-        RegCloseKey(*hfolder);
-        ret = ERROR_ALREADY_EXISTS;
-    }
-
-    RegCloseKey(hroot);
-
-    return HRESULT_FROM_WIN32(ret);
-}
-
-static HRESULT reg_open_folder(const WCHAR *path, HKEY *hfolder)
-{
-    HKEY hroot;
-    DWORD ret;
-
-    ret = RegCreateKeyA(HKEY_LOCAL_MACHINE, root, &hroot);
-    if (ret) return HRESULT_FROM_WIN32(ret);
-
-    while (*path == '\\') path++;
-    ret = RegOpenKeyExW(hroot, path, 0, KEY_ALL_ACCESS, hfolder);
-    if (ret == ERROR_FILE_NOT_FOUND)
-        ret = ERROR_PATH_NOT_FOUND;
-
-    RegCloseKey(hroot);
-
-    return HRESULT_FROM_WIN32(ret);
-}
-
-static HRESULT reg_delete_folder(const WCHAR *path, const WCHAR *name)
-{
-    HKEY hroot, hfolder;
-    DWORD ret;
-
-    ret = RegCreateKeyA(HKEY_LOCAL_MACHINE, root, &hroot);
-    if (ret) return HRESULT_FROM_WIN32(ret);
-
-    while (*path == '\\') path++;
-    ret = RegOpenKeyExW(hroot, path, 0, DELETE, &hfolder);
-
-    RegCloseKey(hroot);
-
-    while (*name == '\\') name++;
-    if (ret == ERROR_SUCCESS)
-    {
-        ret = RegDeleteKeyW(hfolder, name);
-        RegCloseKey(hfolder);
-    }
-
-    return HRESULT_FROM_WIN32(ret);
-}
-
-static inline void reg_close_folder(HKEY hfolder)
-{
-    RegCloseKey(hfolder);
-}
-
 static HRESULT WINAPI TaskFolder_get_Path(ITaskFolder *iface, BSTR *path)
 {
     TaskFolder *folder = impl_from_ITaskFolder(iface);
@@ -273,9 +202,47 @@ static HRESULT WINAPI TaskFolder_CreateFolder(ITaskFolder *iface, BSTR path, VAR
     return hr;
 }
 
+WCHAR *get_full_path(const WCHAR *parent, const WCHAR *path)
+{
+    static const WCHAR bslash[] = { '\\', 0 };
+    WCHAR *folder_path;
+    int len = 0;
+
+    if (path) len = strlenW(path);
+
+    if (parent) len += strlenW(parent);
+
+    /* +1 if parent is not '\' terminated */
+    folder_path = heap_alloc((len + 2) * sizeof(WCHAR));
+    if (!folder_path) return NULL;
+
+    folder_path[0] = 0;
+
+    if (parent)
+        strcpyW(folder_path, parent);
+
+    if (path && *path)
+    {
+        len = strlenW(folder_path);
+        if (!len || folder_path[len - 1] != '\\')
+            strcatW(folder_path, bslash);
+
+        while (*path == '\\') path++;
+        strcatW(folder_path, path);
+    }
+
+    len = strlenW(folder_path);
+    if (!len)
+        strcatW(folder_path, bslash);
+
+    return folder_path;
+}
+
 static HRESULT WINAPI TaskFolder_DeleteFolder(ITaskFolder *iface, BSTR name, LONG flags)
 {
     TaskFolder *folder = impl_from_ITaskFolder(iface);
+    WCHAR *folder_path;
+    HRESULT hr;
 
     TRACE("%p,%s,%x\n", iface, debugstr_w(name), flags);
 
@@ -284,18 +251,31 @@ static HRESULT WINAPI TaskFolder_DeleteFolder(ITaskFolder *iface, BSTR name, LON
     if (flags)
         FIXME("unsupported flags %x\n", flags);
 
-    return reg_delete_folder(folder->path, name);
+    folder_path = get_full_path(folder->path, name);
+    if (!folder_path) return E_OUTOFMEMORY;
+
+    hr = SchRpcDelete(folder_path, 0);
+    heap_free(folder_path);
+    return hr;
 }
 
 static HRESULT WINAPI TaskFolder_GetTask(ITaskFolder *iface, BSTR name, IRegisteredTask **task)
 {
     TaskFolder *folder = impl_from_ITaskFolder(iface);
+    ITaskDefinition *taskdef;
+    HRESULT hr;
 
     TRACE("%p,%s,%p\n", iface, debugstr_w(name), task);
 
     if (!task) return E_POINTER;
 
-    return RegisteredTask_create(folder->path, name, NULL, 0, task, FALSE);
+    hr = TaskDefinition_create(&taskdef);
+    if (hr != S_OK) return hr;
+
+    hr = RegisteredTask_create(folder->path, name, taskdef, 0, 0, task, FALSE);
+    if (hr != S_OK)
+        ITaskDefinition_Release(taskdef);
+    return hr;
 }
 
 static HRESULT WINAPI TaskFolder_GetTasks(ITaskFolder *iface, LONG flags, IRegisteredTaskCollection **tasks)
@@ -311,28 +291,54 @@ static HRESULT WINAPI TaskFolder_GetTasks(ITaskFolder *iface, LONG flags, IRegis
 
 static HRESULT WINAPI TaskFolder_DeleteTask(ITaskFolder *iface, BSTR name, LONG flags)
 {
-    FIXME("%p,%s,%x: stub\n", iface, debugstr_w(name), flags);
-    return E_NOTIMPL;
+    TaskFolder *folder = impl_from_ITaskFolder(iface);
+    WCHAR *folder_path;
+    HRESULT hr;
+
+    TRACE("%p,%s,%x\n", iface, debugstr_w(name), flags);
+
+    if (!name || !*name) return E_ACCESSDENIED;
+
+    if (flags)
+        FIXME("unsupported flags %x\n", flags);
+
+    folder_path = get_full_path(folder->path, name);
+    if (!folder_path) return E_OUTOFMEMORY;
+
+    hr = SchRpcDelete(folder_path, 0);
+    heap_free(folder_path);
+    return hr;
 }
 
 static HRESULT WINAPI TaskFolder_RegisterTask(ITaskFolder *iface, BSTR name, BSTR xml, LONG flags,
                                               VARIANT user, VARIANT password, TASK_LOGON_TYPE logon,
                                               VARIANT sddl, IRegisteredTask **task)
 {
+    TaskFolder *folder = impl_from_ITaskFolder(iface);
+    IRegisteredTask *regtask = NULL;
     ITaskDefinition *taskdef;
     HRESULT hr;
 
     TRACE("%p,%s,%s,%x,%s,%s,%d,%s,%p\n", iface, debugstr_w(name), debugstr_w(xml), flags,
           debugstr_variant(&user), debugstr_variant(&password), logon, debugstr_variant(&sddl), task);
 
+    if (!xml) return HRESULT_FROM_WIN32(RPC_X_NULL_REF_POINTER);
+
+    if (!task) task = &regtask;
+
     hr = TaskDefinition_create(&taskdef);
     if (hr != S_OK) return hr;
 
     hr = ITaskDefinition_put_XmlText(taskdef, xml);
     if (hr == S_OK)
-        hr = ITaskFolder_RegisterTaskDefinition(iface, name, taskdef, flags, user, password, logon, sddl, task);
+        hr = RegisteredTask_create(folder->path, name, taskdef, flags, logon, task, TRUE);
 
-    ITaskDefinition_Release(taskdef);
+    if (hr != S_OK)
+        ITaskDefinition_Release(taskdef);
+
+    if (regtask)
+        IRegisteredTask_Release(regtask);
+
     return hr;
 }
 
@@ -355,7 +361,10 @@ static HRESULT WINAPI TaskFolder_RegisterTaskDefinition(ITaskFolder *iface, BSTR
 
     if (!task) task = &regtask;
 
-    hr = RegisteredTask_create(folder->path, name, definition, logon, task, TRUE);
+    ITaskDefinition_AddRef(definition);
+    hr = RegisteredTask_create(folder->path, name, definition, flags, logon, task, TRUE);
+    if (hr != S_OK)
+        ITaskDefinition_Release(definition);
 
     if (regtask)
         IRegisteredTask_Release(regtask);
@@ -401,52 +410,49 @@ static const ITaskFolderVtbl TaskFolder_vtbl =
 
 HRESULT TaskFolder_create(const WCHAR *parent, const WCHAR *path, ITaskFolder **obj, BOOL create)
 {
-    static const WCHAR bslash[] = { '\\', 0 };
     TaskFolder *folder;
     WCHAR *folder_path;
-    int len = 0;
     HRESULT hr;
-    HKEY hfolder;
 
     if (path)
     {
-        len = strlenW(path);
+        int len = strlenW(path);
         if (len && path[len - 1] == '\\') return ERROR_INVALID_NAME;
     }
 
-    if (parent) len += strlenW(parent);
-
-    /* +1 if parent is not '\' terminated */
-    folder_path = heap_alloc((len + 2) * sizeof(WCHAR));
+    folder_path = get_full_path(parent, path);
     if (!folder_path) return E_OUTOFMEMORY;
 
-    folder_path[0] = 0;
-
-    if (parent)
-        strcpyW(folder_path, parent);
-
-    if (path && *path)
+    if (create)
     {
-        len = strlenW(folder_path);
-        if (!len || folder_path[len - 1] != '\\')
-            strcatW(folder_path, bslash);
+        hr = SchRpcCreateFolder(folder_path, NULL, 0);
+    }
+    else
+    {
+        DWORD start_index, count, i;
+        TASK_NAMES names;
 
-        while (*path == '\\') path++;
-        strcatW(folder_path, path);
+        start_index = 0;
+        names = NULL;
+        hr = SchRpcEnumFolders(folder_path, 0, &start_index, 0, &count, &names);
+        if (hr == S_OK)
+        {
+            for (i = 0; i < count; i++)
+                MIDL_user_free(names[i]);
+            MIDL_user_free(names);
+        }
+        else
+        {
+            if (hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND))
+                hr = HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND);
+        }
     }
 
-    len = strlenW(folder_path);
-    if (!len)
-        strcatW(folder_path, bslash);
-
-    hr = create ? reg_create_folder(folder_path, &hfolder) : reg_open_folder(folder_path, &hfolder);
-    if (hr)
+    if (FAILED(hr))
     {
         heap_free(folder_path);
         return hr;
     }
-
-    reg_close_folder(hfolder);
 
     folder = heap_alloc(sizeof(*folder));
     if (!folder)

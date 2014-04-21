@@ -184,7 +184,9 @@ int CDECL MSVCRT____mb_cur_max_func(void)
   return get_locinfo()->mb_cur_max;
 }
 
-/* ___mb_cur_max_l_func - not exported in native msvcrt */
+/*********************************************************************
+ *		___mb_cur_max_l_func  (MSVCR80.@)
+ */
 int* CDECL ___mb_cur_max_l_func(MSVCRT__locale_t locale)
 {
   MSVCRT_pthreadlocinfo locinfo;
@@ -1151,8 +1153,10 @@ unsigned char* CDECL _mbstok(unsigned char *str, const unsigned char *delim)
 {
     thread_data_t *data = msvcrt_get_thread_data();
 
+#if _MSVCR_VER == 0
     if(!str && !data->mbstok_next)
         return NULL;
+#endif
 
     return _mbstok_s_l(str, delim, &data->mbstok_next, NULL);
 }

@@ -150,6 +150,13 @@ static IDirectDrawSurface4 *get_depth_stencil(IDirect3DDevice3 *device)
     return ret;
 }
 
+static HRESULT set_display_mode(IDirectDraw4 *ddraw, DWORD width, DWORD height)
+{
+    if (SUCCEEDED(IDirectDraw4_SetDisplayMode(ddraw, width, height, 32, 0, 0)))
+        return DD_OK;
+    return IDirectDraw4_SetDisplayMode(ddraw, width, height, 24, 0, 0);
+}
+
 static D3DCOLOR get_surface_color(IDirectDrawSurface4 *surface, UINT x, UINT y)
 {
     RECT rect = {x, y, x + 1, y + 1};
@@ -576,12 +583,8 @@ static void test_coop_level_create_device_window(void)
 
     focus_window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        DestroyWindow(focus_window);
-        return;
-    }
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
 
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, NULL, DDSCL_NORMAL);
     ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
@@ -693,6 +696,21 @@ static void test_clipper_blt(void)
         0x00000000, 0x00000000, 0x00ff0000, 0x00ffffff,
         0x00000000, 0x00000000, 0x00ff0000, 0x00ffffff,
     };
+    /* Nvidia on Windows seems to have an off-by-one error
+     * when processing source rectangles. Our left = 1 and
+     * right = 5 input reads from x = {1, 2, 3}. x = 4 is
+     * read as well, but only for the edge pixels on the
+     * output image. The bug happens on the y axis as well,
+     * but we only read one row there, and all source rows
+     * contain the same data. This bug is not dependent on
+     * the presence of a clipper. */
+    static const D3DCOLOR expected1_broken[] =
+    {
+        0x000000ff, 0x000000ff, 0x00000000, 0x00000000,
+        0x000000ff, 0x000000ff, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x00ff0000, 0x00ff0000,
+        0x00000000, 0x00000000, 0x0000ff00, 0x00ff0000,
+    };
     static const D3DCOLOR expected2[] =
     {
         0x000000ff, 0x000000ff, 0x00000000, 0x00000000,
@@ -704,12 +722,8 @@ static void test_clipper_blt(void)
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             10, 10, 640, 480, 0, 0, 0, 0);
     ShowWindow(window, SW_SHOW);
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        DestroyWindow(window);
-        return;
-    }
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
 
     ret = GetClientRect(window, &client_rect);
     ok(ret, "Failed to get client rect.\n");
@@ -810,7 +824,8 @@ static void test_clipper_blt(void)
             x = 80 * ((2 * j) + 1);
             y = 60 * ((2 * i) + 1);
             color = get_surface_color(dst_surface, x, y);
-            ok(compare_color(color, expected1[i * 4 + j], 1),
+            ok(compare_color(color, expected1[i * 4 + j], 1)
+                    || broken(compare_color(color, expected1_broken[i * 4 + j], 1)),
                     "Expected color 0x%08x at %u,%u, got 0x%08x.\n", expected1[i * 4 + j], x, y, color);
         }
     }
@@ -948,13 +963,8 @@ static void test_surface_interface_mismatch(void)
 
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
-
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        goto cleanup;
-    }
-
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
@@ -1035,11 +1045,8 @@ static void test_coop_level_threaded(void)
     IDirectDraw4 *ddraw;
     HRESULT hr;
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
     create_window_thread(&p);
 
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, p.window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
@@ -1235,11 +1242,8 @@ static void test_texture_load_ckey(void)
     HRESULT hr;
     DDCOLORKEY ckey;
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, NULL, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
@@ -2101,12 +2105,8 @@ static void test_surface_qi(void)
         return;
     }
     IDirect3DDevice_Release(device);
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        DestroyWindow(window);
-        return;
-    }
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
@@ -2213,11 +2213,8 @@ static void test_wndproc(void)
     };
 
     /* DDSCL_EXCLUSIVE replaces the window's window proc. */
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
 
     wc.lpfnWndProc = test_proc;
     wc.lpszClassName = "ddraw_test_wndproc_wc";
@@ -2330,12 +2327,8 @@ static void test_window_style(void)
 
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 100, 100, 0, 0, 0, 0);
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        DestroyWindow(window);
-        return;
-    }
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
 
     style = GetWindowLongA(window, GWL_STYLE);
     exstyle = GetWindowLongA(window, GWL_EXSTYLE);
@@ -2381,12 +2374,8 @@ static void test_redundant_mode_set(void)
 
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 100, 100, 0, 0, 0, 0);
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        DestroyWindow(window);
-        return;
-    }
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
 
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
     ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
@@ -2457,6 +2446,7 @@ static void test_coop_level_mode_set(void)
     HWND window, window2;
     HRESULT hr;
     ULONG ref;
+    MSG msg;
 
     static const UINT exclusive_messages[] =
     {
@@ -2473,11 +2463,8 @@ static void test_coop_level_mode_set(void)
         0,
     };
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
 
     wc.lpfnWndProc = mode_set_proc;
     wc.lpszClassName = "ddraw_test_wndproc_wc";
@@ -2521,12 +2508,13 @@ static void test_coop_level_mode_set(void)
             fullscreen_rect.left, fullscreen_rect.top, fullscreen_rect.right, fullscreen_rect.bottom,
             r.left, r.top, r.right, r.bottom);
 
+    PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE);
     expect_messages = exclusive_messages;
     screen_size.cx = 0;
     screen_size.cy = 0;
 
-    hr = IDirectDraw4_SetDisplayMode(ddraw, 640, 480, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw, 640, 480);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
 
     ok(!*expect_messages, "Expected message %#x, but didn't receive it.\n", *expect_messages);
     expect_messages = NULL;
@@ -2566,6 +2554,7 @@ static void test_coop_level_mode_set(void)
             s.left, s.top, s.right, s.bottom,
             r.left, r.top, r.right, r.bottom);
 
+    PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE);
     expect_messages = exclusive_messages;
     screen_size.cx = 0;
     screen_size.cy = 0;
@@ -2646,12 +2635,13 @@ static void test_coop_level_mode_set(void)
             fullscreen_rect.left, fullscreen_rect.top, fullscreen_rect.right, fullscreen_rect.bottom,
             r.left, r.top, r.right, r.bottom);
 
+    PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE);
     expect_messages = normal_messages;
     screen_size.cx = 0;
     screen_size.cy = 0;
 
-    hr = IDirectDraw4_SetDisplayMode(ddraw, 640, 480, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw, 640, 480);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
 
     ok(!*expect_messages, "Expected message %#x, but didn't receive it.\n", *expect_messages);
     expect_messages = NULL;
@@ -2689,6 +2679,7 @@ static void test_coop_level_mode_set(void)
             fullscreen_rect.left, fullscreen_rect.top, fullscreen_rect.right, fullscreen_rect.bottom,
             r.left, r.top, r.right, r.bottom);
 
+    PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE);
     expect_messages = normal_messages;
     screen_size.cx = 0;
     screen_size.cy = 0;
@@ -2770,12 +2761,13 @@ static void test_coop_level_mode_set(void)
             fullscreen_rect.left, fullscreen_rect.top, fullscreen_rect.right, fullscreen_rect.bottom,
             r.left, r.top, r.right, r.bottom);
 
+    PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE);
     expect_messages = normal_messages;
     screen_size.cx = 0;
     screen_size.cy = 0;
 
-    hr = IDirectDraw4_SetDisplayMode(ddraw, 640, 480, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw, 640, 480);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
 
     ok(!*expect_messages, "Expected message %#x, but didn't receive it.\n", *expect_messages);
     expect_messages = NULL;
@@ -2813,6 +2805,7 @@ static void test_coop_level_mode_set(void)
             fullscreen_rect.left, fullscreen_rect.top, fullscreen_rect.right, fullscreen_rect.bottom,
             r.left, r.top, r.right, r.bottom);
 
+    PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE);
     expect_messages = normal_messages;
     screen_size.cx = 0;
     screen_size.cy = 0;
@@ -2860,9 +2853,10 @@ static void test_coop_level_mode_set(void)
     /* Changing the coop level from EXCLUSIVE to NORMAL restores the screen resolution */
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
     ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-    hr = IDirectDraw4_SetDisplayMode(ddraw, 640, 480, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw, 640, 480);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
 
+    PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE);
     expect_messages = exclusive_messages;
     screen_size.cx = 0;
     screen_size.cy = 0;
@@ -2899,8 +2893,8 @@ static void test_coop_level_mode_set(void)
     /* The screen restore is a property of DDSCL_EXCLUSIVE  */
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL | DDSCL_FULLSCREEN);
     ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-    hr = IDirectDraw4_SetDisplayMode(ddraw, 640, 480, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw, 640, 480);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
 
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
@@ -2926,9 +2920,10 @@ static void test_coop_level_mode_set(void)
     /* If the window is changed at the same time, messages are sent to the new window. */
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
     ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-    hr = IDirectDraw4_SetDisplayMode(ddraw, 640, 480, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw, 640, 480);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
 
+    PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE);
     expect_messages = exclusive_messages;
     screen_size.cx = 0;
     screen_size.cy = 0;
@@ -2993,22 +2988,18 @@ static void test_coop_level_mode_set_multi(void)
     HRESULT hr;
     ULONG ref;
 
-    if (!(ddraw1 = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
-
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 100, 100, 0, 0, 0, 0);
+    ddraw1 = create_ddraw();
+    ok(!!ddraw1, "Failed to create a ddraw object.\n");
 
     orig_w = GetSystemMetrics(SM_CXSCREEN);
     orig_h = GetSystemMetrics(SM_CYSCREEN);
 
     /* With just a single ddraw object, the display mode is restored on
      * release. */
-    hr = IDirectDraw4_SetDisplayMode(ddraw1, 800, 600, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw1, 800, 600);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
     w = GetSystemMetrics(SM_CXSCREEN);
     ok(w == 800, "Got unexpected screen width %u.\n", w);
     h = GetSystemMetrics(SM_CYSCREEN);
@@ -3024,16 +3015,16 @@ static void test_coop_level_mode_set_multi(void)
     /* When there are multiple ddraw objects, the display mode is restored to
      * the initial mode, before the first SetDisplayMode() call. */
     ddraw1 = create_ddraw();
-    hr = IDirectDraw4_SetDisplayMode(ddraw1, 800, 600, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw1, 800, 600);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
     w = GetSystemMetrics(SM_CXSCREEN);
     ok(w == 800, "Got unexpected screen width %u.\n", w);
     h = GetSystemMetrics(SM_CYSCREEN);
     ok(h == 600, "Got unexpected screen height %u.\n", h);
 
     ddraw2 = create_ddraw();
-    hr = IDirectDraw4_SetDisplayMode(ddraw2, 640, 480, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw2, 640, 480);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
     w = GetSystemMetrics(SM_CXSCREEN);
     ok(w == 640, "Got unexpected screen width %u.\n", w);
     h = GetSystemMetrics(SM_CYSCREEN);
@@ -3055,16 +3046,16 @@ static void test_coop_level_mode_set_multi(void)
 
     /* Regardless of release ordering. */
     ddraw1 = create_ddraw();
-    hr = IDirectDraw4_SetDisplayMode(ddraw1, 800, 600, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw1, 800, 600);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
     w = GetSystemMetrics(SM_CXSCREEN);
     ok(w == 800, "Got unexpected screen width %u.\n", w);
     h = GetSystemMetrics(SM_CYSCREEN);
     ok(h == 600, "Got unexpected screen height %u.\n", h);
 
     ddraw2 = create_ddraw();
-    hr = IDirectDraw4_SetDisplayMode(ddraw2, 640, 480, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw2, 640, 480);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
     w = GetSystemMetrics(SM_CXSCREEN);
     ok(w == 640, "Got unexpected screen width %u.\n", w);
     h = GetSystemMetrics(SM_CYSCREEN);
@@ -3087,8 +3078,8 @@ static void test_coop_level_mode_set_multi(void)
     /* But only for ddraw objects that called SetDisplayMode(). */
     ddraw1 = create_ddraw();
     ddraw2 = create_ddraw();
-    hr = IDirectDraw4_SetDisplayMode(ddraw2, 640, 480, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw2, 640, 480);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
     w = GetSystemMetrics(SM_CXSCREEN);
     ok(w == 640, "Got unexpected screen width %u.\n", w);
     h = GetSystemMetrics(SM_CYSCREEN);
@@ -3111,16 +3102,16 @@ static void test_coop_level_mode_set_multi(void)
     /* If there's a ddraw object that's currently in exclusive mode, it blocks
      * restoring the display mode. */
     ddraw1 = create_ddraw();
-    hr = IDirectDraw4_SetDisplayMode(ddraw1, 800, 600, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw1, 800, 600);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
     w = GetSystemMetrics(SM_CXSCREEN);
     ok(w == 800, "Got unexpected screen width %u.\n", w);
     h = GetSystemMetrics(SM_CYSCREEN);
     ok(h == 600, "Got unexpected screen height %u.\n", h);
 
     ddraw2 = create_ddraw();
-    hr = IDirectDraw4_SetDisplayMode(ddraw2, 640, 480, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw2, 640, 480);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
     w = GetSystemMetrics(SM_CXSCREEN);
     ok(w == 640, "Got unexpected screen width %u.\n", w);
     h = GetSystemMetrics(SM_CYSCREEN);
@@ -3145,8 +3136,8 @@ static void test_coop_level_mode_set_multi(void)
 
     /* Exclusive mode blocks mode setting on other ddraw objects in general. */
     ddraw1 = create_ddraw();
-    hr = IDirectDraw4_SetDisplayMode(ddraw1, 800, 600, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw1, 800, 600);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
     w = GetSystemMetrics(SM_CXSCREEN);
     ok(w == 800, "Got unexpected screen width %u.\n", w);
     h = GetSystemMetrics(SM_CYSCREEN);
@@ -3156,7 +3147,7 @@ static void test_coop_level_mode_set_multi(void)
     ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
 
     ddraw2 = create_ddraw();
-    hr = IDirectDraw4_SetDisplayMode(ddraw2, 640, 480, 32, 0, 0);
+    hr = set_display_mode(ddraw2, 640, 480);
     ok(hr == DDERR_NOEXCLUSIVEMODE, "Got unexpected hr %#x.\n", hr);
 
     ref = IDirectDraw4_Release(ddraw1);
@@ -3181,11 +3172,8 @@ static void test_initialize(void)
     IDirectDraw4 *ddraw;
     HRESULT hr;
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
 
     hr = IDirectDraw4_Initialize(ddraw, NULL);
     ok(hr == DDERR_ALREADYINITIALIZED, "Initialize returned hr %#x.\n", hr);
@@ -3209,11 +3197,8 @@ static void test_coop_level_surf_create(void)
     DDSURFACEDESC2 ddsd;
     HRESULT hr;
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
 
     memset(&ddsd, 0, sizeof(ddsd));
     ddsd.dwSize = sizeof(ddsd);
@@ -3314,13 +3299,8 @@ static void test_coop_level_multi_window(void)
             0, 0, 640, 480, 0, 0, 0, 0);
     window2 = CreateWindowA("static", "ddraw_test2", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        DestroyWindow(window2);
-        DestroyWindow(window1);
-        return;
-    }
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
 
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window1, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
@@ -3458,8 +3438,8 @@ static BOOL test_mode_restored(IDirectDraw4 *ddraw, HWND window)
 
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
     ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-    hr = IDirectDraw4_SetDisplayMode(ddraw, 640, 480, 32, 0, 0);
-    ok(SUCCEEDED(hr), "SetDisplayMode failed, hr %#x.\n", hr);
+    hr = set_display_mode(ddraw, 640, 480);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
 
@@ -3486,8 +3466,8 @@ static void test_coop_level_versions(void)
     window = CreateWindowA("static", "ddraw_test1", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
 
-    if (!(ddraw4 = create_ddraw()))
-        goto done;
+    ddraw4 = create_ddraw();
+    ok(!!ddraw4, "Failed to create a ddraw object.\n");
     /* Newly created ddraw objects restore the mode on ddraw2+::SetCooperativeLevel(NORMAL) */
     restored = test_mode_restored(ddraw4, window);
     ok(restored, "Display mode not restored in new ddraw object\n");
@@ -3510,8 +3490,8 @@ static void test_coop_level_versions(void)
     IDirectDraw_Release(ddraw);
     IDirectDraw4_Release(ddraw4);
 
-    if (!(ddraw4 = create_ddraw()))
-        goto done;
+    ddraw4 = create_ddraw();
+    ok(!!ddraw4, "Failed to create a ddraw object.\n");
     hr = IDirectDraw4_QueryInterface(ddraw4, &IID_IDirectDraw, (void **)&ddraw);
     ok(SUCCEEDED(hr), "QueryInterface failed, hr %#x.\n", hr);
 
@@ -3524,8 +3504,8 @@ static void test_coop_level_versions(void)
     IDirectDraw4_Release(ddraw4);
 
     /* A failing call does not restore the ddraw2+ behavior */
-    if (!(ddraw4 = create_ddraw()))
-        goto done;
+    ddraw4 = create_ddraw();
+    ok(!!ddraw4, "Failed to create a ddraw object.\n");
     hr = IDirectDraw4_QueryInterface(ddraw4, &IID_IDirectDraw, (void **)&ddraw);
     ok(SUCCEEDED(hr), "QueryInterface failed, hr %#x.\n", hr);
 
@@ -3540,8 +3520,8 @@ static void test_coop_level_versions(void)
     IDirectDraw4_Release(ddraw4);
 
     /* Neither does a sequence of successful calls with the new interface */
-    if (!(ddraw4 = create_ddraw()))
-        goto done;
+    ddraw4 = create_ddraw();
+    ok(!!ddraw4, "Failed to create a ddraw object.\n");
     hr = IDirectDraw4_QueryInterface(ddraw4, &IID_IDirectDraw, (void **)&ddraw);
     ok(SUCCEEDED(hr), "QueryInterface failed, hr %#x.\n", hr);
 
@@ -3558,8 +3538,8 @@ static void test_coop_level_versions(void)
     IDirectDraw4_Release(ddraw4);
 
     /* ddraw1::CreateSurface does not triger the ddraw1 behavior */
-    if (!(ddraw4 = create_ddraw()))
-        goto done;
+    ddraw4 = create_ddraw();
+    ok(!!ddraw4, "Failed to create a ddraw object.\n");
     hr = IDirectDraw4_QueryInterface(ddraw4, &IID_IDirectDraw, (void **)&ddraw);
     ok(SUCCEEDED(hr), "QueryInterface failed, hr %#x.\n", hr);
 
@@ -3579,8 +3559,6 @@ static void test_coop_level_versions(void)
 
     IDirectDraw_Release(ddraw);
     IDirectDraw4_Release(ddraw4);
-
-done:
     DestroyWindow(window);
 }
 
@@ -3831,11 +3809,8 @@ static void test_coop_level_activateapp(void)
     DDSURFACEDESC2 ddsd;
     IDirectDrawSurface4 *surface;
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
 
     wc.lpfnWndProc = activateapp_test_proc;
     wc.lpszClassName = "ddraw_test_wndproc_wc";
@@ -3985,12 +3960,8 @@ static void test_texturemanage(void)
                 DDSCAPS_SYSTEMMEMORY, 0},
     };
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
-
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, NULL, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
@@ -4097,6 +4068,8 @@ static void test_block_formats_creation(void)
     DWORD supported_fmts = 0, supported_overlay_fmts = 0;
     DWORD num_fourcc_codes = 0, *fourcc_codes;
     DDSURFACEDESC2 ddsd;
+    DDCAPS hal_caps;
+
     static const struct
     {
         DWORD fourcc;
@@ -4186,12 +4159,19 @@ static void test_block_formats_creation(void)
     }
     HeapFree(GetProcessHeap(), 0, fourcc_codes);
 
+    memset(&hal_caps, 0, sizeof(hal_caps));
+    hal_caps.dwSize = sizeof(hal_caps);
+    hr = IDirectDraw4_GetCaps(ddraw, &hal_caps, NULL);
+    ok(SUCCEEDED(hr), "Failed to get caps, hr %#x.\n", hr);
+
     for (i = 0; i < sizeof(formats) / sizeof(*formats); i++)
     {
         for (j = 0; j < sizeof(types) / sizeof(*types); j++)
         {
             BOOL support;
-            if (formats[i].overlay != types[j].overlay)
+
+            if (formats[i].overlay != types[j].overlay
+                    || (types[j].overlay && !(hal_caps.dwCaps & DDCAPS_OVERLAY)))
                 continue;
 
             if (formats[i].overlay)
@@ -4574,14 +4554,10 @@ static void test_rt_caps(void)
         },
     };
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
-
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
@@ -4822,14 +4798,10 @@ static void test_primary_caps(void)
         },
     };
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
-
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
 
     for (i = 0; i < sizeof(test_data) / sizeof(*test_data); ++i)
     {
@@ -4945,14 +4917,10 @@ static void test_surface_lock(void)
         },
     };
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
-
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
@@ -4972,7 +4940,7 @@ static void test_surface_lock(void)
 
     for (i = 0; i < sizeof(tests) / sizeof(*tests); i++)
     {
-        memset(&ddsd, 0, sizeof(ddsd)),
+        memset(&ddsd, 0, sizeof(ddsd));
         ddsd.dwSize = sizeof(ddsd);
         ddsd.dwFlags = DDSD_CAPS;
         if (!(tests[i].caps & DDSCAPS_PRIMARYSURFACE))
@@ -4992,7 +4960,7 @@ static void test_surface_lock(void)
         hr = IDirectDraw4_CreateSurface(ddraw, &ddsd, &surface, NULL);
         ok(SUCCEEDED(hr), "Failed to create surface, type %s, hr %#x.\n", tests[i].name, hr);
 
-        memset(&ddsd, 0, sizeof(ddsd)),
+        memset(&ddsd, 0, sizeof(ddsd));
         ddsd.dwSize = sizeof(ddsd);
         hr = IDirectDrawSurface4_Lock(surface, NULL, &ddsd, DDLOCK_WAIT, NULL);
         ok(SUCCEEDED(hr), "Failed to lock surface, type %s, hr %#x.\n", tests[i].name, hr);
@@ -5126,16 +5094,12 @@ static void test_flip(void)
     DDBLTFX fx;
     HRESULT hr;
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
-
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
 
-    hr = IDirectDraw4_SetDisplayMode(ddraw, 640, 480, 32, 0, 0);
+    hr = set_display_mode(ddraw, 640, 480);
     ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
@@ -5330,15 +5294,10 @@ static void test_set_surface_desc(void)
         {DDSCAPS_PRIMARYSURFACE | DDSCAPS_SYSTEMMEMORY, 0, FALSE, "systemmemory primary"},
     };
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
-
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
-
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
@@ -5352,7 +5311,7 @@ static void test_set_surface_desc(void)
     U2(U4(ddsd).ddpfPixelFormat).dwRBitMask = 0x00ff0000;
     U3(U4(ddsd).ddpfPixelFormat).dwGBitMask = 0x0000ff00;
     U4(U4(ddsd).ddpfPixelFormat).dwBBitMask = 0x000000ff;
-    ddsd.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN;
 
     hr = IDirectDraw4_CreateSurface(ddraw, &ddsd, &surface, NULL);
     ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
@@ -5393,7 +5352,8 @@ static void test_set_surface_desc(void)
 
     hr = IDirectDrawSurface4_GetSurfaceDesc(surface, &ddsd);
     ok(SUCCEEDED(hr), "Failed to get surface desc, hr %#x.\n", hr);
-    ok(ddsd.ddsCaps.dwCaps == DDSCAPS_SYSTEMMEMORY, "Got unexpected caps %#x.\n", ddsd.ddsCaps.dwCaps);
+    ok(ddsd.ddsCaps.dwCaps == (DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN),
+            "Got unexpected caps %#x.\n", ddsd.ddsCaps.dwCaps);
     ok(ddsd.ddsCaps.dwCaps2 == 0, "Got unexpected caps2 %#x.\n", 0);
 
     /* Setting the caps is an error. This also means the original description cannot be reapplied. */
@@ -5409,7 +5369,7 @@ static void test_set_surface_desc(void)
     ddsd.lpSurface = data;
     hr = IDirectDrawSurface4_SetSurfaceDesc(surface, &ddsd, 0);
     ok(hr == DDERR_INVALIDCAPS, "Setting DDSD_CAPS returned %#x.\n", hr);
-    ddsd.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN;
     hr = IDirectDrawSurface4_SetSurfaceDesc(surface, &ddsd, 0);
     ok(hr == DDERR_INVALIDCAPS, "Setting DDSD_CAPS returned %#x.\n", hr);
     ddsd.ddsCaps.dwCaps = 0;
@@ -5419,7 +5379,8 @@ static void test_set_surface_desc(void)
 
     hr = IDirectDrawSurface4_GetSurfaceDesc(surface, &ddsd);
     ok(SUCCEEDED(hr), "Failed to get surface desc, hr %#x.\n", hr);
-    ok(ddsd.ddsCaps.dwCaps == DDSCAPS_SYSTEMMEMORY, "Got unexpected caps %#x.\n", ddsd.ddsCaps.dwCaps);
+    ok(ddsd.ddsCaps.dwCaps == (DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN),
+            "Got unexpected caps %#x.\n", ddsd.ddsCaps.dwCaps);
     ok(ddsd.ddsCaps.dwCaps2 == 0, "Got unexpected caps2 %#x.\n", 0);
 
     /* Setting the height is allowed, but it cannot be set to 0, and only if LPSURFACE is set too. */
@@ -5623,14 +5584,10 @@ static void test_user_memory_getdc(void)
     HDC dc;
     unsigned int x, y;
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
-
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
 
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
@@ -5645,7 +5602,7 @@ static void test_user_memory_getdc(void)
     U2(U4(ddsd).ddpfPixelFormat).dwRBitMask = 0x00ff0000;
     U3(U4(ddsd).ddpfPixelFormat).dwGBitMask = 0x0000ff00;
     U4(U4(ddsd).ddpfPixelFormat).dwBBitMask = 0x000000ff;
-    ddsd.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY | DDSCAPS_OFFSCREENPLAIN;
     hr = IDirectDraw4_CreateSurface(ddraw, &ddsd, &surface, NULL);
     ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
 
@@ -5718,14 +5675,10 @@ static void test_sysmem_overlay(void)
     IDirectDrawSurface4 *surface;
     ULONG ref;
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
-
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
 
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
@@ -5762,18 +5715,13 @@ static void test_primary_palette(void)
     HWND window;
     HRESULT hr;
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
-
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
-    hr = IDirectDraw4_SetDisplayMode(ddraw, 640, 480, 8, 0, 0);
-    if (hr == E_NOTIMPL)
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    if (FAILED(hr = IDirectDraw4_SetDisplayMode(ddraw, 640, 480, 8, 0, 0)))
     {
-        win_skip("changing display mode is not supported (8bpp)\n");
+        win_skip("Failed to set 8 bpp display mode, skipping test.\n");
         IDirectDraw4_Release(ddraw);
         DestroyWindow(window);
         return;
@@ -5875,14 +5823,10 @@ static void test_surface_attachment(void)
     HWND window;
     HRESULT hr;
 
-    if (!(ddraw = create_ddraw()))
-    {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
-
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
     hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
@@ -6128,22 +6072,35 @@ static void test_surface_attachment(void)
 static void test_private_data(void)
 {
     IDirectDraw4 *ddraw;
-    IDirectDrawSurface4 *surface;
+    IDirectDrawSurface4 *surface, *surface2;
     DDSURFACEDESC2 surface_desc;
     ULONG refcount, refcount2, refcount3;
     IUnknown *ptr;
     DWORD size = sizeof(ptr);
     HRESULT hr;
     HWND window;
-
-    if (!(ddraw = create_ddraw()))
+    DDSCAPS2 caps = {DDSCAPS_COMPLEX, 0, 0, 0};
+    DWORD data[] = {1, 2, 3, 4};
+    DDCAPS hal_caps;
+    static const GUID ddraw_private_data_test_guid =
     {
-        skip("Failed to create a ddraw object, skipping test.\n");
-        return;
-    }
+        0xfdb37466,
+        0x428f,
+        0x4edf,
+        {0xa3,0x7f,0x9b,0x1d,0xf4,0x88,0xc5,0xfc}
+    };
+    static const GUID ddraw_private_data_test_guid2 =
+    {
+        0x2e5afac2,
+        0x87b5,
+        0x4c10,
+        {0x9b,0x4b,0x89,0xd7,0xd1,0x12,0xe7,0x2b}
+    };
 
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
     hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
@@ -6155,47 +6112,99 @@ static void test_private_data(void)
     hr = IDirectDraw4_CreateSurface(ddraw, &surface_desc, &surface, NULL);
     ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
 
+    /* NULL pointers are not valid, but don't cause a crash. */
+    hr = IDirectDrawSurface7_SetPrivateData(surface, &ddraw_private_data_test_guid, NULL,
+            sizeof(IUnknown *), DDSPD_IUNKNOWNPOINTER);
+    ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_SetPrivateData(surface, &ddraw_private_data_test_guid, NULL, 0, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_SetPrivateData(surface, &ddraw_private_data_test_guid, NULL, 1, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
+
     /* DDSPD_IUNKNOWNPOINTER needs sizeof(IUnknown *) bytes of data. */
-    hr = IDirectDrawSurface4_SetPrivateData(surface, &IID_IDirect3D, ddraw,
+    hr = IDirectDrawSurface4_SetPrivateData(surface, &ddraw_private_data_test_guid, ddraw,
             0, DDSPD_IUNKNOWNPOINTER);
     ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
-    hr = IDirectDrawSurface4_SetPrivateData(surface, &IID_IDirect3D, ddraw,
+    hr = IDirectDrawSurface4_SetPrivateData(surface, &ddraw_private_data_test_guid, ddraw,
             5, DDSPD_IUNKNOWNPOINTER);
     ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
-    hr = IDirectDrawSurface4_SetPrivateData(surface, &IID_IDirect3D, ddraw,
+    hr = IDirectDrawSurface4_SetPrivateData(surface, &ddraw_private_data_test_guid, ddraw,
             sizeof(ddraw) * 2, DDSPD_IUNKNOWNPOINTER);
     ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
 
+    /* Note that with a size != 0 and size != sizeof(IUnknown *) and
+     * DDSPD_IUNKNOWNPOINTER set SetPrivateData in ddraw4 and ddraw7
+     * erases the old content and returns an error. This behavior has
+     * been fixed in d3d8 and d3d9. Unless an application is found
+     * that depends on this we don't care about this behavior. */
+    hr = IDirectDrawSurface4_SetPrivateData(surface, &ddraw_private_data_test_guid, ddraw,
+            sizeof(ddraw), DDSPD_IUNKNOWNPOINTER);
+    ok(SUCCEEDED(hr), "Failed to set private data, hr %#x.\n", hr);
+    hr = IDirectDrawSurface4_SetPrivateData(surface, &ddraw_private_data_test_guid, ddraw,
+            0, DDSPD_IUNKNOWNPOINTER);
+    ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
+    size = sizeof(ptr);
+    hr = IDirectDrawSurface4_GetPrivateData(surface, &ddraw_private_data_test_guid, &ptr, &size);
+    ok(SUCCEEDED(hr), "Failed to get private data, hr %#x.\n", hr);
+    hr = IDirectDrawSurface4_FreePrivateData(surface, &ddraw_private_data_test_guid);
+    ok(SUCCEEDED(hr), "Failed to free private data, hr %#x.\n", hr);
+
     refcount = get_refcount((IUnknown *)ddraw);
-    hr = IDirectDrawSurface4_SetPrivateData(surface, &IID_IDirect3D, ddraw,
+    hr = IDirectDrawSurface4_SetPrivateData(surface, &ddraw_private_data_test_guid, ddraw,
             sizeof(ddraw), DDSPD_IUNKNOWNPOINTER);
     ok(SUCCEEDED(hr), "Failed to set private data, hr %#x.\n", hr);
     refcount2 = get_refcount((IUnknown *)ddraw);
     ok(refcount2 == refcount + 1, "Got unexpected refcount %u.\n", refcount2);
 
-    hr = IDirectDrawSurface4_FreePrivateData(surface, &IID_IDirect3D);
+    hr = IDirectDrawSurface4_FreePrivateData(surface, &ddraw_private_data_test_guid);
     ok(SUCCEEDED(hr), "Failed to free private data, hr %#x.\n", hr);
     refcount2 = get_refcount((IUnknown *)ddraw);
     ok(refcount2 == refcount, "Got unexpected refcount %u.\n", refcount2);
 
-    hr = IDirectDrawSurface4_SetPrivateData(surface, &IID_IDirect3D, ddraw,
+    hr = IDirectDrawSurface4_SetPrivateData(surface, &ddraw_private_data_test_guid, ddraw,
             sizeof(ddraw), DDSPD_IUNKNOWNPOINTER);
     ok(SUCCEEDED(hr), "Failed to set private data, hr %#x.\n", hr);
-    hr = IDirectDrawSurface4_SetPrivateData(surface, &IID_IDirect3D, surface,
+    hr = IDirectDrawSurface4_SetPrivateData(surface, &ddraw_private_data_test_guid, surface,
             sizeof(surface), DDSPD_IUNKNOWNPOINTER);
     ok(SUCCEEDED(hr), "Failed to set private data, hr %#x.\n", hr);
     refcount2 = get_refcount((IUnknown *)ddraw);
     ok(refcount2 == refcount, "Got unexpected refcount %u.\n", refcount2);
 
-    hr = IDirectDrawSurface4_SetPrivateData(surface, &IID_IDirect3D, ddraw,
+    hr = IDirectDrawSurface4_SetPrivateData(surface, &ddraw_private_data_test_guid, ddraw,
             sizeof(ddraw), DDSPD_IUNKNOWNPOINTER);
     ok(SUCCEEDED(hr), "Failed to set private data, hr %#x.\n", hr);
-    hr = IDirectDrawSurface4_GetPrivateData(surface, &IID_IDirect3D, &ptr, &size);
+    size = 2 * sizeof(ptr);
+    hr = IDirectDrawSurface4_GetPrivateData(surface, &ddraw_private_data_test_guid, &ptr, &size);
     ok(SUCCEEDED(hr), "Failed to get private data, hr %#x.\n", hr);
+    ok(size == sizeof(ddraw), "Got unexpected size %u.\n", size);
     refcount2 = get_refcount(ptr);
     /* Object is NOT addref'ed by the getter. */
     ok(ptr == (IUnknown *)ddraw, "Returned interface pointer is %p, expected %p.\n", ptr, ddraw);
     ok(refcount2 == refcount + 1, "Got unexpected refcount %u.\n", refcount2);
+
+    ptr = (IUnknown *)0xdeadbeef;
+    size = 1;
+    hr = IDirectDrawSurface4_GetPrivateData(surface, &ddraw_private_data_test_guid, NULL, &size);
+    ok(hr == DDERR_MOREDATA, "Got unexpected hr %#x.\n", hr);
+    ok(size == sizeof(ddraw), "Got unexpected size %u.\n", size);
+    size = 2 * sizeof(ptr);
+    hr = IDirectDrawSurface4_GetPrivateData(surface, &ddraw_private_data_test_guid, NULL, &size);
+    ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
+    ok(size == 2 * sizeof(ptr), "Got unexpected size %u.\n", size);
+    size = 1;
+    hr = IDirectDrawSurface4_GetPrivateData(surface, &ddraw_private_data_test_guid, &ptr, &size);
+    ok(hr == DDERR_MOREDATA, "Got unexpected hr %#x.\n", hr);
+    ok(size == sizeof(ddraw), "Got unexpected size %u.\n", size);
+    ok(ptr == (IUnknown *)0xdeadbeef, "Got unexpected pointer %p.\n", ptr);
+    hr = IDirectDrawSurface4_GetPrivateData(surface, &ddraw_private_data_test_guid2, NULL, NULL);
+    ok(hr == DDERR_NOTFOUND, "Got unexpected hr %#x.\n", hr);
+    size = 0xdeadbabe;
+    hr = IDirectDrawSurface4_GetPrivateData(surface, &ddraw_private_data_test_guid2, &ptr, &size);
+    ok(hr == DDERR_NOTFOUND, "Got unexpected hr %#x.\n", hr);
+    ok(ptr == (IUnknown *)0xdeadbeef, "Got unexpected pointer %p.\n", ptr);
+    ok(size == 0xdeadbabe, "Got unexpected size %u.\n", size);
+    hr = IDirectDrawSurface4_GetPrivateData(surface, &ddraw_private_data_test_guid, NULL, NULL);
+    ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
 
     refcount3 = IDirectDrawSurface4_Release(surface);
     ok(!refcount3, "Got unexpected refcount %u.\n", refcount3);
@@ -6205,6 +6214,347 @@ static void test_private_data(void)
     refcount2 = get_refcount((IUnknown *)ddraw);
     ok(refcount2 == refcount - 1, "Got unexpected refcount %u.\n", refcount2);
 
+    memset(&hal_caps, 0, sizeof(hal_caps));
+    hal_caps.dwSize = sizeof(hal_caps);
+    hr = IDirectDraw7_GetCaps(ddraw, &hal_caps, NULL);
+    ok(SUCCEEDED(hr), "Failed to get caps, hr %#x.\n", hr);
+    if ((hal_caps.ddsCaps.dwCaps & (DDSCAPS_TEXTURE | DDSCAPS_MIPMAP)) == (DDSCAPS_TEXTURE | DDSCAPS_MIPMAP))
+    {
+        reset_ddsd(&surface_desc);
+        surface_desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_MIPMAPCOUNT;
+        surface_desc.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_SYSTEMMEMORY | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP;
+        surface_desc.dwHeight = 4;
+        surface_desc.dwWidth = 4;
+        U2(surface_desc).dwMipMapCount = 2;
+        hr = IDirectDraw4_CreateSurface(ddraw, &surface_desc, &surface, NULL);
+        ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+        hr = IDirectDrawSurface4_GetAttachedSurface(surface, &caps, &surface2);
+        ok(SUCCEEDED(hr), "Failed to get attached surface, hr %#x.\n", hr);
+
+        hr = IDirectDrawSurface4_SetPrivateData(surface, &ddraw_private_data_test_guid, data, sizeof(data), 0);
+        ok(SUCCEEDED(hr), "Failed to set private data, hr %#x.\n", hr);
+        hr = IDirectDrawSurface4_GetPrivateData(surface2, &ddraw_private_data_test_guid, NULL, NULL);
+        ok(hr == DDERR_NOTFOUND, "Got unexpected hr %#x.\n", hr);
+
+        IDirectDrawSurface4_Release(surface2);
+        IDirectDrawSurface4_Release(surface);
+    }
+    else
+        skip("Mipmapped textures not supported, skipping mipmap private data test.\n");
+
+    refcount = IDirectDraw4_Release(ddraw);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+    DestroyWindow(window);
+}
+
+static void test_pixel_format(void)
+{
+    HWND window, window2 = NULL;
+    HDC hdc, hdc2 = NULL;
+    HMODULE gl = NULL;
+    int format, test_format;
+    PIXELFORMATDESCRIPTOR pfd;
+    IDirectDraw4 *ddraw = NULL;
+    IDirectDrawClipper *clipper = NULL;
+    DDSURFACEDESC2 ddsd;
+    IDirectDrawSurface4 *primary = NULL;
+    DDBLTFX fx;
+    HRESULT hr;
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            100, 100, 160, 160, NULL, NULL, NULL, NULL);
+    if (!window)
+    {
+        skip("Failed to create window\n");
+        return;
+    }
+
+    window2 = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            100, 100, 160, 160, NULL, NULL, NULL, NULL);
+
+    hdc = GetDC(window);
+    if (!hdc)
+    {
+        skip("Failed to get DC\n");
+        goto cleanup;
+    }
+
+    if (window2)
+        hdc2 = GetDC(window2);
+
+    gl = LoadLibraryA("opengl32.dll");
+    ok(!!gl, "failed to load opengl32.dll; SetPixelFormat()/GetPixelFormat() may not work right\n");
+
+    format = GetPixelFormat(hdc);
+    ok(format == 0, "new window has pixel format %d\n", format);
+
+    ZeroMemory(&pfd, sizeof(pfd));
+    pfd.nSize = sizeof(pfd);
+    pfd.nVersion = 1;
+    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL;
+    pfd.iPixelType = PFD_TYPE_RGBA;
+    pfd.iLayerType = PFD_MAIN_PLANE;
+    format = ChoosePixelFormat(hdc, &pfd);
+    if (format <= 0)
+    {
+        skip("no pixel format available\n");
+        goto cleanup;
+    }
+
+    if (!SetPixelFormat(hdc, format, &pfd) || GetPixelFormat(hdc) != format)
+    {
+        skip("failed to set pixel format\n");
+        goto cleanup;
+    }
+
+    if (!hdc2 || !SetPixelFormat(hdc2, format, &pfd) || GetPixelFormat(hdc2) != format)
+    {
+        skip("failed to set pixel format on second window\n");
+        if (hdc2)
+        {
+            ReleaseDC(window2, hdc2);
+            hdc2 = NULL;
+        }
+    }
+
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+
+    test_format = GetPixelFormat(hdc);
+    ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
+
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    if (FAILED(hr))
+    {
+        skip("Failed to set cooperative level, hr %#x.\n", hr);
+        goto cleanup;
+    }
+
+    test_format = GetPixelFormat(hdc);
+    ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
+
+    if (hdc2)
+    {
+        hr = IDirectDraw4_CreateClipper(ddraw, 0, &clipper, NULL);
+        ok(SUCCEEDED(hr), "Failed to create clipper, hr %#x.\n", hr);
+        hr = IDirectDrawClipper_SetHWnd(clipper, 0, window2);
+        ok(SUCCEEDED(hr), "Failed to set clipper window, hr %#x.\n", hr);
+
+        test_format = GetPixelFormat(hdc);
+        ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
+
+        test_format = GetPixelFormat(hdc2);
+        ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
+    }
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE;
+
+    hr = IDirectDraw4_CreateSurface(ddraw, &ddsd, &primary, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n",hr);
+
+    test_format = GetPixelFormat(hdc);
+    ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
+
+    if (hdc2)
+    {
+        test_format = GetPixelFormat(hdc2);
+        ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
+    }
+
+    if (clipper)
+    {
+        hr = IDirectDrawSurface4_SetClipper(primary, clipper);
+        ok(SUCCEEDED(hr), "Failed to set clipper, hr %#x.\n", hr);
+
+        test_format = GetPixelFormat(hdc);
+        ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
+
+        test_format = GetPixelFormat(hdc2);
+        ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
+    }
+
+    memset(&fx, 0, sizeof(fx));
+    fx.dwSize = sizeof(fx);
+    hr = IDirectDrawSurface4_Blt(primary, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
+    ok(SUCCEEDED(hr), "Failed to clear source surface, hr %#x.\n", hr);
+
+    test_format = GetPixelFormat(hdc);
+    ok(test_format == format, "window has pixel format %d, expected %d\n", test_format, format);
+
+    if (hdc2)
+    {
+        test_format = GetPixelFormat(hdc2);
+        ok(test_format == format, "second window has pixel format %d, expected %d\n", test_format, format);
+    }
+
+cleanup:
+    if (primary) IDirectDrawSurface4_Release(primary);
+    if (clipper) IDirectDrawClipper_Release(clipper);
+    if (ddraw) IDirectDraw4_Release(ddraw);
+    if (gl) FreeLibrary(gl);
+    if (hdc) ReleaseDC(window, hdc);
+    if (hdc2) ReleaseDC(window2, hdc2);
+    if (window) DestroyWindow(window);
+    if (window2) DestroyWindow(window2);
+}
+
+static void test_create_surface_pitch(void)
+{
+    IDirectDrawSurface4 *surface;
+    DDSURFACEDESC2 surface_desc;
+    IDirectDraw4 *ddraw;
+    unsigned int i;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+    void *mem;
+
+    static const struct
+    {
+        DWORD placement;
+        DWORD flags_in;
+        DWORD pitch_in;
+        HRESULT hr;
+        DWORD flags_out;
+        DWORD pitch_out;
+    }
+    test_data[] =
+    {
+        {DDSCAPS_VIDEOMEMORY,   0,                              0,      DD_OK,
+                                DDSD_PITCH,                     0x100},
+        {DDSCAPS_VIDEOMEMORY,   DDSD_PITCH,                     0x104,  DD_OK,
+                                DDSD_PITCH,                     0x100},
+        {DDSCAPS_VIDEOMEMORY,   DDSD_PITCH,                     0x0fc,  DD_OK,
+                                DDSD_PITCH,                     0x100},
+        {DDSCAPS_VIDEOMEMORY,   DDSD_LPSURFACE | DDSD_PITCH,    0x100,  DDERR_INVALIDCAPS,
+                                0,                              0    },
+        {DDSCAPS_SYSTEMMEMORY,  0,                              0,      DD_OK,
+                                DDSD_PITCH,                     0x100},
+        {DDSCAPS_SYSTEMMEMORY,  DDSD_PITCH,                     0x104,  DD_OK,
+                                DDSD_PITCH,                     0x100},
+        {DDSCAPS_SYSTEMMEMORY,  DDSD_PITCH,                     0x0fc,  DD_OK,
+                                DDSD_PITCH,                     0x100},
+        {DDSCAPS_SYSTEMMEMORY,  DDSD_LPSURFACE,                 0,      DDERR_INVALIDPARAMS,
+                                0,                              0    },
+        {DDSCAPS_SYSTEMMEMORY,  DDSD_LPSURFACE | DDSD_PITCH,    0x104,  DD_OK,
+                                DDSD_PITCH,                     0x104},
+        {DDSCAPS_SYSTEMMEMORY,  DDSD_LPSURFACE | DDSD_PITCH,    0x102,  DDERR_INVALIDPARAMS,
+                                0,                              0    },
+        {DDSCAPS_SYSTEMMEMORY,  DDSD_LPSURFACE | DDSD_PITCH,    0x0fc,  DDERR_INVALIDPARAMS,
+                                0,                              0    },
+    };
+    DWORD flags_mask = DDSD_PITCH | DDSD_LPSURFACE;
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
+
+    mem = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, ((64 * 4) + 4) * 64);
+
+    for (i = 0; i < sizeof(test_data) / sizeof(*test_data); ++i)
+    {
+        memset(&surface_desc, 0, sizeof(surface_desc));
+        surface_desc.dwSize = sizeof(surface_desc);
+        surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | test_data[i].flags_in;
+        surface_desc.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN | test_data[i].placement;
+        surface_desc.dwWidth = 64;
+        surface_desc.dwHeight = 64;
+        U1(surface_desc).lPitch = test_data[i].pitch_in;
+        surface_desc.lpSurface = mem;
+        U4(surface_desc).ddpfPixelFormat.dwSize = sizeof(U4(surface_desc).ddpfPixelFormat);
+        U4(surface_desc).ddpfPixelFormat.dwFlags = DDPF_RGB;
+        U1(U4(surface_desc).ddpfPixelFormat).dwRGBBitCount = 32;
+        U2(U4(surface_desc).ddpfPixelFormat).dwRBitMask = 0x00ff0000;
+        U3(U4(surface_desc).ddpfPixelFormat).dwGBitMask = 0x0000ff00;
+        U4(U4(surface_desc).ddpfPixelFormat).dwBBitMask = 0x000000ff;
+        hr = IDirectDraw4_CreateSurface(ddraw, &surface_desc, &surface, NULL);
+        ok(hr == test_data[i].hr || (test_data[i].placement == DDSCAPS_VIDEOMEMORY && hr == DDERR_NODIRECTDRAWHW),
+                "Test %u: Got unexpected hr %#x, expected %#x.\n", i, hr, test_data[i].hr);
+        if (FAILED(hr))
+            continue;
+
+        memset(&surface_desc, 0, sizeof(surface_desc));
+        surface_desc.dwSize = sizeof(surface_desc);
+        hr = IDirectDrawSurface4_GetSurfaceDesc(surface, &surface_desc);
+        ok(SUCCEEDED(hr), "Test %u: Failed to get surface desc, hr %#x.\n", i, hr);
+        ok((surface_desc.dwFlags & flags_mask) == test_data[i].flags_out,
+                "Test %u: Got unexpected flags %#x, expected %#x.\n",
+                i, surface_desc.dwFlags & flags_mask, test_data[i].flags_out);
+        ok(U1(surface_desc).lPitch == test_data[i].pitch_out,
+                "Test %u: Got unexpected pitch %u, expected %u.\n",
+                i, U1(surface_desc).lPitch, test_data[i].pitch_out);
+
+        IDirectDrawSurface4_Release(surface);
+    }
+
+    HeapFree(GetProcessHeap(), 0, mem);
+    refcount = IDirectDraw4_Release(ddraw);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+    DestroyWindow(window);
+}
+
+static void test_mipmap_lock(void)
+{
+    IDirectDrawSurface4 *surface, *surface2;
+    DDSURFACEDESC2 surface_desc;
+    IDirectDraw4 *ddraw;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+    DDSCAPS2 caps = {DDSCAPS_COMPLEX, 0, 0, 0};
+    DDCAPS hal_caps;
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
+
+    memset(&hal_caps, 0, sizeof(hal_caps));
+    hal_caps.dwSize = sizeof(hal_caps);
+    hr = IDirectDraw4_GetCaps(ddraw, &hal_caps, NULL);
+    ok(SUCCEEDED(hr), "Failed to get caps, hr %#x.\n", hr);
+    if ((hal_caps.ddsCaps.dwCaps & (DDSCAPS_TEXTURE | DDSCAPS_MIPMAP)) != (DDSCAPS_TEXTURE | DDSCAPS_MIPMAP))
+    {
+        skip("Mipmapped textures not supported, skipping mipmap lock test.\n");
+        IDirectDraw4_Release(ddraw);
+        DestroyWindow(window);
+        return;
+    }
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_MIPMAPCOUNT;
+    surface_desc.dwWidth = 4;
+    surface_desc.dwHeight = 4;
+    U2(surface_desc).dwMipMapCount = 2;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP
+            | DDSCAPS_SYSTEMMEMORY;
+    hr = IDirectDraw4_CreateSurface(ddraw, &surface_desc, &surface, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+    hr = IDirectDrawSurface4_GetAttachedSurface(surface, &caps, &surface2);
+    ok(SUCCEEDED(hr), "Failed to get attached surface, hr %#x.\n", hr);
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    hr = IDirectDrawSurface4_Lock(surface, NULL, &surface_desc, 0, NULL);
+    ok(SUCCEEDED(hr), "Failed to lock surface, hr %#x.\n", hr);
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    hr = IDirectDrawSurface4_Lock(surface2, NULL, &surface_desc, 0, NULL);
+    ok(SUCCEEDED(hr), "Failed to lock surface, hr %#x.\n", hr);
+    IDirectDrawSurface4_Unlock(surface2, NULL);
+    IDirectDrawSurface4_Unlock(surface, NULL);
+
+    IDirectDrawSurface4_Release(surface2);
+    IDirectDrawSurface4_Release(surface);
     refcount = IDirectDraw4_Release(ddraw);
     ok(!refcount, "Got unexpected refcount %u.\n", refcount);
     DestroyWindow(window);
@@ -6212,6 +6562,15 @@ static void test_private_data(void)
 
 START_TEST(ddraw4)
 {
+    IDirectDraw4 *ddraw;
+
+    if (!(ddraw = create_ddraw()))
+    {
+        skip("Failed to create a ddraw object, skipping tests.\n");
+        return;
+    }
+    IDirectDraw4_Release(ddraw);
+
     test_process_vertices();
     test_coop_level_create_device_window();
     test_clipper_blt();
@@ -6255,4 +6614,7 @@ START_TEST(ddraw4)
     test_primary_palette();
     test_surface_attachment();
     test_private_data();
+    test_pixel_format();
+    test_create_surface_pitch();
+    test_mipmap_lock();
 }

@@ -2605,8 +2605,9 @@ HRESULT CDECL wined3d_surface_update_desc(struct wined3d_surface *surface,
     HRESULT hr;
     DWORD valid_location = 0;
 
-    TRACE("surface %p, width %u, height %u, format %s, multisample_type %#x, multisample_quality %u.\n",
-            surface, width, height, debug_d3dformat(format_id), multisample_type, multisample_type);
+    TRACE("surface %p, width %u, height %u, format %s, multisample_type %#x, multisample_quality %u, "
+            "mem %p, pitch %u.\n",
+            surface, width, height, debug_d3dformat(format_id), multisample_type, multisample_type, mem, pitch);
 
     if (!resource_size)
         return WINED3DERR_INVALIDCALL;
@@ -5122,7 +5123,8 @@ HRESULT surface_load_location(struct wined3d_surface *surface, DWORD location)
 
     if (surface->resource.usage & WINED3DUSAGE_DEPTHSTENCIL)
     {
-        if (location == WINED3D_LOCATION_TEXTURE_RGB && surface->locations & WINED3D_LOCATION_DRAWABLE)
+        if (location == WINED3D_LOCATION_TEXTURE_RGB
+                && surface->locations & (WINED3D_LOCATION_DRAWABLE | WINED3D_LOCATION_DISCARDED))
         {
             struct wined3d_context *context = context_acquire(device, NULL);
             surface_load_ds_location(surface, context, location);

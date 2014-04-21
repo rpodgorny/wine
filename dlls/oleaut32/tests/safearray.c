@@ -123,7 +123,7 @@ static ULONG WINAPI RecordInfo_Release(IRecordInfo *iface)
 
 static HRESULT WINAPI RecordInfo_RecordInit(IRecordInfo *iface, PVOID pvNew)
 {
-  ok(0, "enexpected call\n");
+  ok(0, "unexpected call\n");
   return E_NOTIMPL;
 }
 
@@ -1062,10 +1062,11 @@ test_LockUnlock_Vector:
 static void test_SafeArrayGetPutElement(void)
 {
   SAFEARRAYBOUND sab[4];
-  LONG indices[NUM_DIMENSIONS];
+  LONG indices[NUM_DIMENSIONS], index;
   SAFEARRAY *sa;
   HRESULT hres;
   int value = 0, gotvalue, dimension;
+  IRecordInfoImpl *irec;
   unsigned int x,y,z,a;
 
   for (dimension = 0; dimension < NUM_DIMENSIONS; dimension++)
@@ -1079,8 +1080,6 @@ static void test_SafeArrayGetPutElement(void)
     return; /* Some early versions can't handle > 3 dims */
 
   ok(sa->cbElements == sizeof(value), "int size mismatch\n");
-  if (sa->cbElements != sizeof(value))
-    return;
 
   /* Failure cases */
   for (x = 0; x < NUM_DIMENSIONS; x++)
@@ -1184,6 +1183,34 @@ static void test_SafeArrayGetPutElement(void)
   }
   hres = SafeArrayDestroy(sa);
   ok(hres == S_OK, "got 0x%08x\n", hres);
+
+  /* VT_RECORD array */
+  irec = IRecordInfoImpl_Construct();
+  irec->ref = 1;
+
+  sab[0].lLbound = 0;
+  sab[0].cElements = 8;
+
+  sa = pSafeArrayCreateEx(VT_RECORD, 1, sab, &irec->IRecordInfo_iface);
+  ok(sa != NULL, "failed to create array\n");
+  ok(irec->ref == 2, "got %d\n", irec->ref);
+
+  index = 0;
+  irec->recordcopy = 0;
+  hres = SafeArrayPutElement(sa, &index, (void*)0xdeadbeef);
+  ok(hres == S_OK, "got 0x%08x\n", hres);
+  ok(irec->recordcopy == 1, "got %d\n", irec->recordcopy);
+
+  index = 0;
+  irec->recordcopy = 0;
+  hres = SafeArrayGetElement(sa, &index, (void*)0xdeadbeef);
+  ok(hres == S_OK, "got 0x%08x\n", hres);
+  ok(irec->recordcopy == 1, "got %d\n", irec->recordcopy);
+
+  hres = SafeArrayDestroy(sa);
+  ok(hres == S_OK, "got 0x%08x\n", hres);
+  ok(irec->ref == 1, "got %d\n", irec->ref);
+  IRecordInfo_Release(&irec->IRecordInfo_iface);
 }
 
 static void test_SafeArrayGetPutElement_BSTR(void)
@@ -1204,8 +1231,6 @@ static void test_SafeArrayGetPutElement_BSTR(void)
     return;
 
   ok(sa->cbElements == sizeof(BSTR), "BSTR size mismatch\n");
-  if (sa->cbElements != sizeof(BSTR))
-    return;
 
   indices[0] = sab.lLbound;
   value = SysAllocString(szTest);
@@ -1268,8 +1293,6 @@ static void test_SafeArrayGetPutElement_IUnknown(void)
     return;
 
   ok(sa->cbElements == sizeof(LPUNKNOWN), "LPUNKNOWN size mismatch\n");
-  if (sa->cbElements != sizeof(LPUNKNOWN))
-    return;
 
   indices[0] = sab.lLbound;
   xtunk.ref = 1;
@@ -1302,8 +1325,6 @@ static void test_SafeArrayRedim_IUnknown(void)
     return;
 
   ok(sa->cbElements == sizeof(LPUNKNOWN), "LPUNKNOWN size mismatch\n");
-  if (sa->cbElements != sizeof(LPUNKNOWN))
-    return;
 
   indices[0] = 2;
   xtunk.ref = 1;
@@ -1334,8 +1355,6 @@ static void test_SafeArrayGetPutElement_VARIANT(void)
     return;
 
   ok(sa->cbElements == sizeof(VARIANT), "VARIANT size mismatch\n");
-  if (sa->cbElements != sizeof(VARIANT))
-    return;
 
   indices[0] = sab.lLbound;
   V_VT(&value) = VT_I4;
@@ -1389,8 +1408,6 @@ static void test_SafeArrayCopyData(void)
     return;
 
   ok(sa->cbElements == sizeof(int), "int size mismatch\n");
-  if (sa->cbElements != sizeof(int))
-    return;
 
   /* Fill the source array with some data; it doesn't matter what */
   for (dimension = 0; dimension < size; dimension++)
@@ -1980,6 +1997,63 @@ static void test_SafeArrayDestroyData (void)
   ok(hres == S_OK, "SAD failed, error code %x.\n", hres);
 }
 
+static void test_safearray_layout(void)
+{
+    IRecordInfoImpl *irec;
+    IRecordInfo *record;
+    GUID guid, *guidptr;
+    SAFEARRAYBOUND sab;
+    SAFEARRAY *sa;
+    DWORD *dwptr;
+    HRESULT hr;
+
+    sab.lLbound = 0;
+    sab.cElements = 10;
+
+    /* GUID field */
+    sa = SafeArrayCreate(VT_UNKNOWN, 1, &sab);
+    ok(sa != NULL, "got %p\n", sa);
+
+    guidptr = (GUID*)sa - 1;
+    ok(IsEqualIID(guidptr, &IID_IUnknown), "got %s\n", wine_dbgstr_guid(guidptr));
+
+    hr = SafeArraySetIID(sa, &IID_IDispatch);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(IsEqualIID(guidptr, &IID_IDispatch), "got %s\n", wine_dbgstr_guid(guidptr));
+
+    memcpy(guidptr, &IID_IUnknown, sizeof(GUID));
+    hr = SafeArrayGetIID(sa, &guid);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(IsEqualIID(&guid, &IID_IUnknown), "got %s\n", wine_dbgstr_guid(&guid));
+
+    hr = SafeArrayDestroy(sa);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* VARTYPE field */
+    sa = SafeArrayCreate(VT_UI1, 1, &sab);
+    ok(sa != NULL, "got %p\n", sa);
+
+    dwptr = (DWORD*)sa - 1;
+    ok(*dwptr == VT_UI1, "got %d\n", *dwptr);
+
+    hr = SafeArrayDestroy(sa);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* IRecordInfo pointer */
+    irec = IRecordInfoImpl_Construct();
+    irec->ref = 1;
+
+    sa = pSafeArrayCreateEx(VT_RECORD, 1, &sab, &irec->IRecordInfo_iface);
+    ok(sa != NULL, "failed to create array\n");
+
+    record = *((IRecordInfo**)sa - 1);
+    ok(record == &irec->IRecordInfo_iface, "got %p\n", record);
+
+    hr = SafeArrayDestroy(sa);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IRecordInfo_Release(&irec->IRecordInfo_iface);
+}
+
 START_TEST(safearray)
 {
     hOleaut32 = GetModuleHandleA("oleaut32.dll");
@@ -2012,4 +2086,5 @@ START_TEST(safearray)
     test_SafeArrayGetPutElement_IUnknown();
     test_SafeArrayRedim_IUnknown();
     test_SafeArrayGetPutElement_VARIANT();
+    test_safearray_layout();
 }

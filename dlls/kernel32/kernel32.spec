@@ -442,6 +442,7 @@
 @ stdcall GetCPInfoExW(long long ptr)
 @ stdcall GetCalendarInfoA(long long long ptr long ptr)
 @ stdcall GetCalendarInfoW(long long long ptr long ptr)
+@ stdcall GetCalendarInfoEx(wstr long ptr long ptr long ptr)
 # @ stub GetComPlusPackageInstallStatus
 @ stdcall GetCommConfig(long ptr long)
 @ stdcall GetCommMask(long ptr)
@@ -939,6 +940,7 @@
 @ stub QueryOldestEventLogRecord
 @ stdcall QueryPerformanceCounter(ptr)
 @ stdcall QueryPerformanceFrequency(ptr)
+@ stdcall QueryUnbiasedInterruptTime(ptr)
 @ stub QueryWin31IniFilesMappedToRegistry
 @ stdcall QueueUserAPC(ptr long long)
 @ stdcall QueueUserWorkItem(ptr ptr long)
@@ -1040,6 +1042,7 @@
 @ stdcall -arch=x86_64 RtlCompareMemory(ptr ptr long) ntdll.RtlCompareMemory
 @ cdecl -arch=arm,x86_64 RtlDeleteFunctionTable(ptr) ntdll.RtlDeleteFunctionTable
 @ stdcall RtlFillMemory(ptr long long) ntdll.RtlFillMemory
+@ cdecl -arch=x86_64 RtlInstallFunctionTableCallback(long long long ptr ptr ptr) ntdll.RtlInstallFunctionTableCallback
 @ stdcall -arch=arm,x86_64 RtlLookupFunctionEntry(long ptr ptr) ntdll.RtlLookupFunctionEntry
 @ stdcall RtlMoveMemory(ptr ptr long) ntdll.RtlMoveMemory
 @ stdcall -arch=x86_64,arm RtlPcToFileHeader(ptr ptr) ntdll.RtlPcToFileHeader
@@ -1190,6 +1193,7 @@
 @ stub SetVolumeMountPointA
 @ stub SetVolumeMountPointW
 @ stdcall SetWaitableTimer(long ptr long ptr ptr long)
+@ stdcall SetWaitableTimerEx(long ptr long ptr ptr ptr long)
 @ stdcall SetupComm(long long long)
 @ stub ShowConsoleCursor
 @ stdcall SignalObjectAndWait(long long long long)
@@ -1274,6 +1278,7 @@
 @ stdcall WerRegisterMemoryBlock(ptr long)
 @ stdcall WerRegisterRuntimeExceptionModule(wstr ptr)
 @ stdcall WerSetFlags(long)
+@ stdcall WerUnregisterMemoryBlock(ptr)
 @ stdcall WideCharToMultiByte(long long wstr long ptr long ptr ptr)
 @ stdcall WinExec(str long)
 @ stdcall Wow64EnableWow64FsRedirection(long)

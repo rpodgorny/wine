@@ -28,6 +28,12 @@
 #include "wine/debug.h"
 WINE_DEFAULT_DEBUG_CHANNEL(msvcp);
 
+#define SECSPERDAY 86400
+/* 1601 to 1970 is 369 years plus 89 leap days */
+#define SECS_1601_TO_1970 ((369 * 365 + 89) * (ULONGLONG)SECSPERDAY)
+#define TICKSPERSEC 10000000
+#define TICKS_1601_TO_1970 (SECS_1601_TO_1970 * TICKSPERSEC)
+
 struct __Container_proxy;
 
 typedef struct {
@@ -343,3 +349,28 @@ void __thiscall _Container_base12__Swap_all(
     if(that->proxy)
         that->proxy->cont = that;
 }
+
+/* _Xtime_get_ticks */
+LONGLONG __cdecl _Xtime_get_ticks(void)
+{
+    FILETIME ft;
+
+    TRACE("\n");
+
+    GetSystemTimeAsFileTime(&ft);
+    return ((LONGLONG)ft.dwHighDateTime<<32) + ft.dwLowDateTime - TICKS_1601_TO_1970;
+}
+
+#if _MSVCP_VER >= 90
+unsigned int __cdecl _Random_device(void)
+{
+    unsigned int ret;
+
+    TRACE("\n");
+
+    /* TODO: throw correct exception in case of failure */
+    if(rand_s(&ret))
+        throw_exception(EXCEPTION, "random number generator failed\n");
+    return ret;
+}
+#endif

@@ -2108,9 +2108,12 @@ static void _test_elem_collection(unsigned line, IUnknown *unk,
         const elem_type_t *elem_types, LONG exlen)
 {
     IHTMLElementCollection *col;
+    IEnumVARIANT *enum_var;
+    IUnknown *enum_unk;
+    ULONG fetched;
     LONG len;
     DWORD i;
-    VARIANT name, index;
+    VARIANT name, index, v, vs[5];
     IDispatch *disp, *disp2;
     HRESULT hres;
 
@@ -2127,6 +2130,13 @@ static void _test_elem_collection(unsigned line, IUnknown *unk,
         len = exlen;
 
     V_VT(&index) = VT_EMPTY;
+
+    hres = IHTMLElementCollection_get__newEnum(col, &enum_unk);
+    ok_(__FILE__,line)(hres == S_OK, "_newEnum failed: %08x\n", hres);
+
+    hres = IUnknown_QueryInterface(enum_unk, &IID_IEnumVARIANT, (void**)&enum_var);
+    IUnknown_Release(enum_unk);
+    ok_(__FILE__,line)(hres == S_OK, "Could not get IEnumVARIANT iface: %08x\n", hres);
 
     for(i=0; i<len; i++) {
         V_VT(&name) = VT_I4;
@@ -2151,8 +2161,52 @@ static void _test_elem_collection(unsigned line, IUnknown *unk,
                 IDispatch_Release(disp2);
         }
 
+        fetched = 0;
+        V_VT(&v) = VT_ERROR;
+        hres = IEnumVARIANT_Next(enum_var, 1, &v, &fetched);
+        ok_(__FILE__,line)(hres == S_OK, "Next failed: %08x\n", hres);
+        ok_(__FILE__,line)(fetched == 1, "fetched = %d\n", fetched);
+        ok_(__FILE__,line)(V_VT(&v) == VT_DISPATCH && V_DISPATCH(&v), "V_VT(v) = %d\n", V_VT(&v));
+        ok_(__FILE__,line)(iface_cmp((IUnknown*)disp, (IUnknown*)V_DISPATCH(&v)), "disp != V_DISPATCH(v)\n");
+        IDispatch_Release(V_DISPATCH(&v));
+
         IDispatch_Release(disp);
     }
+
+    fetched = 0xdeadbeef;
+    V_VT(&v) = VT_BOOL;
+    hres = IEnumVARIANT_Next(enum_var, 1, &v, &fetched);
+    ok_(__FILE__,line)(hres == S_FALSE, "Next returned %08x, expected S_FALSE\n", hres);
+    ok_(__FILE__,line)(fetched == 0, "fetched = %d\n", fetched);
+    ok_(__FILE__,line)(V_VT(&v) == VT_BOOL, "V_VT(v) = %d\n", V_VT(&v));
+
+    hres = IEnumVARIANT_Reset(enum_var);
+    ok_(__FILE__,line)(hres == S_OK, "Reset failed: %08x\n", hres);
+
+    hres = IEnumVARIANT_Skip(enum_var, len > 2 ? len-2 : 0);
+    ok_(__FILE__,line)(hres == S_OK, "Skip failed: %08x\n", hres);
+
+    memset(vs, 0, sizeof(vs));
+    fetched = 0;
+    hres = IEnumVARIANT_Next(enum_var, sizeof(vs)/sizeof(*vs), vs, &fetched);
+    ok_(__FILE__,line)(hres == S_FALSE, "Next failed: %08x\n", hres);
+    ok_(__FILE__,line)(fetched == (len > 2 ? 2 : len), "fetched = %d\n", fetched);
+    if(len) {
+        ok_(__FILE__,line)(V_VT(vs) == VT_DISPATCH && V_DISPATCH(vs), "V_VT(vs[0]) = %d\n", V_VT(vs));
+        IDispatch_Release(V_DISPATCH(vs));
+    }
+    if(len > 1) {
+        ok_(__FILE__,line)(V_VT(vs+1) == VT_DISPATCH && V_DISPATCH(vs+1), "V_VT(vs[1]) = %d\n", V_VT(vs+1));
+        IDispatch_Release(V_DISPATCH(vs+1));
+    }
+
+    hres = IEnumVARIANT_Reset(enum_var);
+    ok_(__FILE__,line)(hres == S_OK, "Reset failed: %08x\n", hres);
+
+    hres = IEnumVARIANT_Skip(enum_var, len+1);
+    ok_(__FILE__,line)(hres == S_FALSE, "Skip failed: %08x\n", hres);
+
+    IEnumVARIANT_Release(enum_var);
 
     V_VT(&name) = VT_I4;
     V_I4(&name) = len;
@@ -5576,6 +5630,9 @@ static void test_tr_elem(IHTMLElement *elem)
     IHTMLElementCollection *col;
     IHTMLTableRow *row;
     HRESULT hres;
+    BSTR bstr;
+    LONG lval;
+    VARIANT vbg, vDefaultbg;
 
     static const elem_type_t cell_types[] = {ET_TD,ET_TD};
 
@@ -5591,6 +5648,74 @@ static void test_tr_elem(IHTMLElement *elem)
 
     test_elem_collection((IUnknown*)col, cell_types, sizeof(cell_types)/sizeof(*cell_types));
     IHTMLElementCollection_Release(col);
+
+    bstr = a2bstr("left");
+    hres = IHTMLTableRow_put_align(row, bstr);
+    ok(hres == S_OK, "set_align failed: %08x\n", hres);
+    SysFreeString(bstr);
+
+    bstr = NULL;
+    hres = IHTMLTableRow_get_align(row, &bstr);
+    ok(hres == S_OK, "get_align failed: %08x\n", hres);
+    ok(bstr != NULL, "get_align returned NULL\n");
+    ok(!strcmp_wa(bstr, "left"), "get_align returned %s\n", wine_dbgstr_w(bstr));
+    SysFreeString(bstr);
+
+    bstr = a2bstr("top");
+    hres = IHTMLTableRow_put_vAlign(row, bstr);
+    ok(hres == S_OK, "set_valign failed: %08x\n", hres);
+    SysFreeString(bstr);
+
+    bstr = NULL;
+    hres = IHTMLTableRow_get_vAlign(row, &bstr);
+    ok(hres == S_OK, "get_valign failed: %08x\n", hres);
+    ok(bstr != NULL, "get_valign returned NULL\n");
+    ok(!strcmp_wa(bstr, "top"), "get_valign returned %s\n", wine_dbgstr_w(bstr));
+    SysFreeString(bstr);
+
+    lval = 0xdeadbeef;
+    hres = IHTMLTableRow_get_rowIndex(row, &lval);
+    ok(hres == S_OK, "get_rowIndex failed: %08x\n", hres);
+    ok(lval == 1, "get_rowIndex returned %d\n", lval);
+
+    lval = 0xdeadbeef;
+    hres = IHTMLTableRow_get_sectionRowIndex(row, &lval);
+    ok(hres == S_OK, "get_sectionRowIndex failed: %08x\n", hres);
+    ok(lval == 1, "get_sectionRowIndex returned %d\n", lval);
+
+    hres = IHTMLTableRow_get_bgColor(row, &vDefaultbg);
+    ok(hres == S_OK, "get_bgColor failed: %08x\n", hres);
+    ok(V_VT(&vDefaultbg) == VT_BSTR, "bstr != NULL\n");
+    ok(!V_BSTR(&vDefaultbg), "V_BSTR(bgColor) = %s\n", wine_dbgstr_w(V_BSTR(&vDefaultbg)));
+
+    V_VT(&vbg) = VT_BSTR;
+    V_BSTR(&vbg) = a2bstr("red");
+    hres = IHTMLTableRow_put_bgColor(row, vbg);
+    ok(hres == S_OK, "put_bgColor failed: %08x\n", hres);
+    VariantClear(&vbg);
+
+    hres = IHTMLTableRow_get_bgColor(row, &vbg);
+    ok(hres == S_OK, "get_bgColor failed: %08x\n", hres);
+    ok(V_VT(&vDefaultbg) == VT_BSTR, "V_VT(&vDefaultbg) != VT_BSTR\n");
+    ok(!strcmp_wa(V_BSTR(&vbg), "#ff0000"), "Unexpected bgcolor %s\n", wine_dbgstr_w(V_BSTR(&vbg)));
+    VariantClear(&vbg);
+
+    V_VT(&vbg) = VT_I4;
+    V_I4(&vbg) = 0xff0000;
+    hres = IHTMLTableRow_put_bgColor(row, vbg);
+    ok(hres == S_OK, "put_bgColor failed: %08x\n", hres);
+    VariantClear(&vbg);
+
+    hres = IHTMLTableRow_get_bgColor(row, &vbg);
+    ok(hres == S_OK, "get_bgColor failed: %08x\n", hres);
+    ok(V_VT(&vDefaultbg) == VT_BSTR, "V_VT(&vDefaultbg) != VT_BSTR\n");
+    ok(!strcmp_wa(V_BSTR(&vbg), "#ff0000"), "Unexpected bgcolor %s\n", wine_dbgstr_w(V_BSTR(&vbg)));
+    VariantClear(&vbg);
+
+    /* Restore Originial */
+    hres = IHTMLTableRow_put_bgColor(row, vDefaultbg);
+    ok(hres == S_OK, "put_bgColor failed: %08x\n", hres);
+    VariantClear(&vDefaultbg);
 
     IHTMLTableRow_Release(row);
 }
@@ -5657,6 +5782,8 @@ static void test_table_elem(IHTMLElement *elem)
     IHTMLDOMNode *node;
     VARIANT v;
     HRESULT hres;
+    BSTR bstr;
+    VARIANT vbg, vDefaultbg;
 
     static const elem_type_t row_types[] = {ET_TR,ET_TR};
     static const elem_type_t all_types[] = {ET_TBODY,ET_TR,ET_TR,ET_TD,ET_TD};
@@ -5709,6 +5836,52 @@ static void test_table_elem(IHTMLElement *elem)
     ok(hres == S_OK, "put_cellSpacing = %08x\n", hres);
     test_table_cell_spacing(table, "11");
     VariantClear(&v);
+
+    bstr = a2bstr("left");
+    hres = IHTMLTable_put_align(table, bstr);
+    ok(hres == S_OK, "set_align failed: %08x\n", hres);
+    SysFreeString(bstr);
+
+    bstr = NULL;
+    hres = IHTMLTable_get_align(table, &bstr);
+    ok(hres == S_OK, "get_align failed: %08x\n", hres);
+    ok(bstr != NULL, "get_align returned NULL\n");
+    ok(!strcmp_wa(bstr, "left"), "get_align returned %s\n", wine_dbgstr_w(bstr));
+    SysFreeString(bstr);
+
+    hres = IHTMLTable_get_bgColor(table, &vDefaultbg);
+    ok(hres == S_OK, "get_bgColor failed: %08x\n", hres);
+    ok(V_VT(&vDefaultbg) == VT_BSTR, "bstr != NULL\n");
+    ok(!V_BSTR(&vDefaultbg), "V_BSTR(bgColor) = %s\n", wine_dbgstr_w(V_BSTR(&vDefaultbg)));
+
+    V_VT(&vbg) = VT_BSTR;
+    V_BSTR(&vbg) = a2bstr("red");
+    hres = IHTMLTable_put_bgColor(table, vbg);
+    ok(hres == S_OK, "put_bgColor failed: %08x\n", hres);
+    VariantClear(&vbg);
+
+    hres = IHTMLTable_get_bgColor(table, &vbg);
+    ok(hres == S_OK, "get_bgColor failed: %08x\n", hres);
+    ok(V_VT(&vDefaultbg) == VT_BSTR, "V_VT(&vDefaultbg) != VT_BSTR\n");
+    ok(!strcmp_wa(V_BSTR(&vbg), "#ff0000"), "Unexpected bgcolor %s\n", wine_dbgstr_w(V_BSTR(&vbg)));
+    VariantClear(&vbg);
+
+    V_VT(&vbg) = VT_I4;
+    V_I4(&vbg) = 0xff0000;
+    hres = IHTMLTable_put_bgColor(table, vbg);
+    ok(hres == S_OK, "put_bgColor failed: %08x\n", hres);
+    VariantClear(&vbg);
+
+    hres = IHTMLTable_get_bgColor(table, &vbg);
+    ok(hres == S_OK, "get_bgColor failed: %08x\n", hres);
+    ok(V_VT(&vDefaultbg) == VT_BSTR, "V_VT(&vDefaultbg) != VT_BSTR\n");
+    ok(!strcmp_wa(V_BSTR(&vbg), "#ff0000"), "Unexpected bgcolor %s\n", wine_dbgstr_w(V_BSTR(&vbg)));
+    VariantClear(&vbg);
+
+    /* Restore Originial */
+    hres = IHTMLTable_put_bgColor(table, vDefaultbg);
+    ok(hres == S_OK, "put_bgColor failed: %08x\n", hres);
+    VariantClear(&vDefaultbg);
 
     IHTMLTable_Release(table);
 }
@@ -6014,7 +6187,6 @@ static void test_stylesheets(IHTMLDocument2 *doc)
     hres = IHTMLStyleSheetsCollection_item(col, &idx, &res);
     ok(hres == E_INVALIDARG, "item failed: %08x, expected E_INVALIDARG\n", hres);
     ok(V_VT(&res) == VT_EMPTY, "V_VT(res) = %d\n", V_VT(&res));
-    ok(V_DISPATCH(&res) != NULL, "V_DISPATCH(&res) == NULL\n");
     VariantClear(&res);
 
     IHTMLStyleSheetsCollection_Release(col);

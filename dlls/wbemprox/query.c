@@ -250,6 +250,15 @@ static HRESULT eval_unary( const struct table *table, UINT row, const struct com
     UINT column;
     LONGLONG lval;
 
+    if (expr->op == OP_NOT)
+    {
+        hr = eval_cond( table, row, expr->left, &lval, type );
+        if (hr != S_OK)
+            return hr;
+        *val = !lval;
+        return S_OK;
+    }
+
     hr = get_column_index( table, expr->left->u.propval->name, &column );
     if (hr != S_OK)
         return hr;
@@ -950,7 +959,7 @@ HRESULT put_propval( const struct view *view, UINT index, const WCHAR *name, VAR
     return set_value( view->table, row, column, val, type );
 }
 
-HRESULT get_properties( const struct view *view, SAFEARRAY **props )
+HRESULT get_properties( const struct view *view, LONG flags, SAFEARRAY **props )
 {
     SAFEARRAY *sa;
     BSTR str;
@@ -961,7 +970,13 @@ HRESULT get_properties( const struct view *view, SAFEARRAY **props )
 
     for (i = 0; i < view->table->num_cols; i++)
     {
+        BOOL is_system;
+
         if (is_method( view->table, i )) continue;
+
+        is_system = is_system_prop( view->table->columns[i].name );
+        if ((flags & WBEM_FLAG_NONSYSTEM_ONLY) && is_system) continue;
+        else if ((flags & WBEM_FLAG_SYSTEM_ONLY) && !is_system) continue;
 
         str = SysAllocString( view->table->columns[i].name );
         if (!str || SafeArrayPutElement( sa, &i, str ) != S_OK)
