@@ -690,18 +690,18 @@
 @ stub -arch=win64 ?__ExceptionPtrAssign@@YAXPEAXPEBX@Z
 @ stub -arch=win32 ?__ExceptionPtrCompare@@YA_NPBX0@Z
 @ stub -arch=win64 ?__ExceptionPtrCompare@@YA_NPEBX0@Z
-@ stub -arch=win32 ?__ExceptionPtrCopy@@YAXPAXPBX@Z
-@ stub -arch=win64 ?__ExceptionPtrCopy@@YAXPEAXPEBX@Z
+@ cdecl -arch=win32 ?__ExceptionPtrCopy@@YAXPAXPBX@Z(ptr ptr) __ExceptionPtrCopy
+@ cdecl -arch=win64 ?__ExceptionPtrCopy@@YAXPEAXPEBX@Z(ptr ptr) __ExceptionPtrCopy
 @ stub -arch=win32 ?__ExceptionPtrCopyException@@YAXPAXPBX1@Z
 @ stub -arch=win64 ?__ExceptionPtrCopyException@@YAXPEAXPEBX1@Z
-@ stub -arch=win32 ?__ExceptionPtrCreate@@YAXPAX@Z
-@ stub -arch=win64 ?__ExceptionPtrCreate@@YAXPEAX@Z
-@ stub -arch=win32 ?__ExceptionPtrCurrentException@@YAXPAX@Z
-@ stub -arch=win64 ?__ExceptionPtrCurrentException@@YAXPEAX@Z
-@ stub -arch=win32 ?__ExceptionPtrDestroy@@YAXPAX@Z
-@ stub -arch=win64 ?__ExceptionPtrDestroy@@YAXPEAX@Z
-@ stub -arch=win32 ?__ExceptionPtrRethrow@@YAXPBX@Z
-@ stub -arch=win64 ?__ExceptionPtrRethrow@@YAXPEBX@Z
+@ cdecl -arch=win32 ?__ExceptionPtrCreate@@YAXPAX@Z(ptr) __ExceptionPtrCreate
+@ cdecl -arch=win64 ?__ExceptionPtrCreate@@YAXPEAX@Z(ptr) __ExceptionPtrCreate
+@ cdecl -arch=win32 ?__ExceptionPtrCurrentException@@YAXPAX@Z(ptr) __ExceptionPtrCurrentException
+@ cdecl -arch=win64 ?__ExceptionPtrCurrentException@@YAXPEAX@Z(ptr) __ExceptionPtrCurrentException
+@ cdecl -arch=win32 ?__ExceptionPtrDestroy@@YAXPAX@Z(ptr) __ExceptionPtrDestroy
+@ cdecl -arch=win64 ?__ExceptionPtrDestroy@@YAXPEAX@Z(ptr) __ExceptionPtrDestroy
+@ cdecl -arch=win32 ?__ExceptionPtrRethrow@@YAXPBX@Z(ptr) __ExceptionPtrRethrow
+@ cdecl -arch=win64 ?__ExceptionPtrRethrow@@YAXPEBX@Z(ptr) __ExceptionPtrRethrow
 @ stub -arch=win32 ?__ExceptionPtrSwap@@YAXPAX0@Z
 @ stub -arch=win64 ?__ExceptionPtrSwap@@YAXPEAX0@Z
 @ stub -arch=win32 ?__ExceptionPtrToBool@@YA_NPBX@Z
@@ -869,7 +869,7 @@
 @ stub _W_Gettnames
 @ stub _Wcsftime
 @ cdecl _XcptFilter(long ptr)
-@ stub __AdjustPointer
+@ cdecl __AdjustPointer(ptr ptr)
 @ stub __BuildCatchObject
 @ stub __BuildCatchObjectHelper
 @ stdcall -arch=x86_64 __C_specific_handler(ptr long ptr ptr) ntdll.__C_specific_handler
@@ -900,7 +900,7 @@
 @ cdecl ___unguarded_readlc_active_add_func() MSVCRT____unguarded_readlc_active_add_func
 @ extern __argc MSVCRT___argc
 @ extern __argv MSVCRT___argv
-### extern __badioinfo #don't forward to msvcrt.__badioinfo, it has different size
+@ extern __badioinfo MSVCRT___badioinfo
 @ cdecl __clean_type_info_names_internal(ptr)
 @ cdecl -arch=i386 __control87_2(long long ptr ptr)
 @ stub __create_locale
@@ -997,7 +997,6 @@
 @ cdecl __p__wenviron() MSVCRT___p__wenviron
 @ cdecl __p__wpgmptr() MSVCRT___p__wpgmptr
 @ cdecl __pctype_func() MSVCRT___pctype_func
-#FIXME: add correct __pioinfo implementation
 @ extern __pioinfo MSVCRT___pioinfo
 @ stub __pwctype_func
 @ cdecl __pxcptinfoptrs() MSVCRT___pxcptinfoptrs
@@ -1875,7 +1874,7 @@
 @ cdecl -ret64 _wcstoui64_l(wstr ptr long ptr) MSVCRT__wcstoui64_l
 @ cdecl _wcstoul_l(wstr ptr long ptr) MSVCRT__wcstoul_l
 @ cdecl _wcsupr(wstr) ntdll._wcsupr
-@ stub _wcsupr_l
+@ cdecl _wcsupr_l(wstr ptr) MSVCRT__wcsupr_l
 @ cdecl _wcsupr_s(wstr long) MSVCRT__wcsupr_s
 @ cdecl _wcsupr_s_l(wstr long ptr) MSVCRT__wcsupr_s_l
 @ stub _wcsxfrm_l

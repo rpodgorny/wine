@@ -58,10 +58,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(virtual);
 WINE_DECLARE_DEBUG_CHANNEL(module);
 
-#ifndef MS_SYNC
-#define MS_SYNC 0
-#endif
-
 #ifndef MAP_NORESERVE
 #define MAP_NORESERVE 0
 #endif
@@ -862,7 +858,7 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
 {
     void *ptr;
     int prot = VIRTUAL_GetUnixProt( vprot | VPROT_COMMITTED /* make sure it is accessible */ );
-    BOOL shared_write = (vprot & VPROT_WRITE) != 0;
+    unsigned int flags = MAP_FIXED | ((vprot & VPROT_WRITECOPY) ? MAP_PRIVATE : MAP_SHARED);
 
     assert( start < view->size );
     assert( start + size <= view->size );
@@ -875,10 +871,8 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
     }
 
     /* only try mmap if media is not removable (or if we require write access) */
-    if (!removable || shared_write)
+    if (!removable || (flags & MAP_SHARED))
     {
-        int flags = MAP_FIXED | (shared_write ? MAP_SHARED : MAP_PRIVATE);
-
         if (mmap( (char *)view->base + start, size, prot, flags, fd, offset ) != (void *)-1)
             goto done;
 
@@ -889,7 +883,7 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
         /* page-aligned (EINVAL), or because the underlying filesystem */
         /* does not support mmap() (ENOEXEC,ENODEV), we do it by hand. */
         if ((errno != ENOEXEC) && (errno != EINVAL) && (errno != ENODEV)) return FILE_GetNtStatus();
-        if (shared_write)  /* we cannot fake shared write mappings */
+        if (flags & MAP_SHARED)  /* we cannot fake shared mappings */
         {
             if (errno == EINVAL) return STATUS_INVALID_PARAMETER;
             ERR( "shared writable mmap not supported, broken filesystem?\n" );
@@ -1125,7 +1119,7 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
         /* unaligned sections, this happens for native subsystem binaries */
         /* in that case Windows simply maps in the whole file */
 
-        if (map_file_into_view( view, fd, 0, total_size, 0, VPROT_COMMITTED | VPROT_READ,
+        if (map_file_into_view( view, fd, 0, total_size, 0, VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY,
                                 !dup_mapping ) != STATUS_SUCCESS) goto error;
 
         /* check that all sections are loaded at the right offset */
@@ -1179,8 +1173,7 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
                             sec->PointerToRawData, (int)pos, file_size, map_size,
                             sec->Characteristics );
             if (map_file_into_view( view, shared_fd, sec->VirtualAddress, map_size, pos,
-                                    VPROT_COMMITTED | VPROT_READ | VPROT_WRITE,
-                                    FALSE ) != STATUS_SUCCESS)
+                                    VPROT_COMMITTED | VPROT_READ | VPROT_WRITE, FALSE ) != STATUS_SUCCESS)
             {
                 ERR_(module)( "Could not map shared section %.8s\n", sec->Name );
                 goto error;
@@ -1196,8 +1189,7 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
                 if (end > base)
                     map_file_into_view( view, shared_fd, base, end - base,
                                         pos + (base - sec->VirtualAddress),
-                                        VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY,
-                                        FALSE );
+                                        VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY, FALSE );
             }
             pos += map_size;
             continue;
@@ -2734,7 +2726,9 @@ NTSTATUS WINAPI NtFlushVirtualMemory( HANDLE process, LPCVOID *addr_ptr,
     {
         if (!*size_ptr) *size_ptr = view->size;
         *addr_ptr = addr;
-        if (msync( addr, *size_ptr, MS_SYNC )) status = STATUS_NOT_MAPPED_DATA;
+#ifdef MS_ASYNC
+        if (msync( addr, *size_ptr, MS_ASYNC )) status = STATUS_NOT_MAPPED_DATA;
+#endif
     }
     server_leave_uninterrupted_section( &csVirtual, &sigset );
     return status;

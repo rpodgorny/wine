@@ -147,6 +147,7 @@ extern int capture_displays_for_fullscreen DECLSPEC_HIDDEN;
 extern int left_option_is_alt DECLSPEC_HIDDEN;
 extern int right_option_is_alt DECLSPEC_HIDDEN;
 extern int allow_immovable_windows DECLSPEC_HIDDEN;
+extern int cursor_clipping_locks_windows DECLSPEC_HIDDEN;
 
 extern int macdrv_start_cocoa_app(unsigned long long tickcount) DECLSPEC_HIDDEN;
 extern void macdrv_window_rejected_focus(const struct macdrv_event *event) DECLSPEC_HIDDEN;
@@ -298,6 +299,7 @@ enum {
     QUERY_DRAG_OPERATION,
     QUERY_IME_CHAR_RECT,
     QUERY_PASTEBOARD_DATA,
+    QUERY_RESIZE_SIZE,
     QUERY_RESIZE_START,
     QUERY_MIN_MAX_INFO,
     NUM_QUERY_TYPES
@@ -331,6 +333,11 @@ typedef struct macdrv_query {
         struct {
             CFStringRef type;
         }                                           pasteboard_data;
+        struct {
+            CGRect          rect;
+            unsigned int    from_left : 1;
+            unsigned int    from_top : 1;
+        }                                           resize_size;
     };
 } macdrv_query;
 

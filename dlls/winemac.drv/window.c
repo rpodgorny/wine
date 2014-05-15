@@ -1374,7 +1374,7 @@ void CDECL macdrv_SetParent(HWND hwnd, HWND parent, HWND old_parent)
  *
  * Assign specified region to window (for non-rectangular windows)
  */
-int CDECL macdrv_SetWindowRgn(HWND hwnd, HRGN hrgn, BOOL redraw)
+void CDECL macdrv_SetWindowRgn(HWND hwnd, HRGN hrgn, BOOL redraw)
 {
     struct macdrv_win_data *data;
 
@@ -1393,8 +1393,6 @@ int CDECL macdrv_SetWindowRgn(HWND hwnd, HRGN hrgn, BOOL redraw)
         if (procid != GetCurrentProcessId())
             SendMessageW(hwnd, WM_MACDRV_SET_WIN_REGION, 0, 0);
     }
-
-    return TRUE;
 }
 
 
@@ -2396,6 +2394,46 @@ fail:
         HeapFree(GetProcessHeap(), 0, qi);
     }
     macdrv_quit_reply(FALSE);
+}
+
+
+/***********************************************************************
+ *              query_resize_size
+ *
+ * Handler for QUERY_RESIZE_SIZE query.
+ */
+BOOL query_resize_size(HWND hwnd, macdrv_query *query)
+{
+    struct macdrv_win_data *data = get_win_data(hwnd);
+    RECT rect = rect_from_cgrect(query->resize_size.rect);
+    int corner;
+    BOOL ret = FALSE;
+
+    if (!data) return FALSE;
+
+    macdrv_mac_to_window_rect(data, &rect);
+
+    if (query->resize_size.from_left)
+    {
+        if (query->resize_size.from_top)
+            corner = WMSZ_TOPLEFT;
+        else
+            corner = WMSZ_BOTTOMLEFT;
+    }
+    else if (query->resize_size.from_top)
+        corner = WMSZ_TOPRIGHT;
+    else
+        corner = WMSZ_BOTTOMRIGHT;
+
+    if (SendMessageW(hwnd, WM_SIZING, corner, (LPARAM)&rect))
+    {
+        macdrv_window_to_mac_rect(data, GetWindowLongW(hwnd, GWL_STYLE), &rect);
+        query->resize_size.rect = cgrect_from_rect(rect);
+        ret = TRUE;
+    }
+
+    release_win_data(data);
+    return ret;
 }
 
 

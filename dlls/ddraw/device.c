@@ -1802,7 +1802,7 @@ static BOOL validate_surface_palette(struct ddraw_surface *surface)
             & (DDPF_PALETTEINDEXED1 | DDPF_PALETTEINDEXED2
             | DDPF_PALETTEINDEXED4 | DDPF_PALETTEINDEXED8
             | DDPF_PALETTEINDEXEDTO8))
-            || wined3d_surface_get_palette(surface->wined3d_surface);
+            || surface->palette;
 }
 
 static HRESULT d3d_device_set_render_target(struct d3d_device *device,
@@ -2945,16 +2945,19 @@ static HRESULT WINAPI d3d_device3_SetLightState(IDirect3DDevice3 *iface,
     wined3d_mutex_lock();
     if (state == D3DLIGHTSTATE_MATERIAL)
     {
-        struct d3d_material *m = ddraw_get_object(&device->handle_table, value - 1, DDRAW_HANDLE_MATERIAL);
-        if (!m)
+        if (value)
         {
-            WARN("Invalid material handle.\n");
-            wined3d_mutex_unlock();
-            return DDERR_INVALIDPARAMS;
-        }
+            struct d3d_material *m;
 
-        TRACE(" activating material %p.\n", m);
-        material_activate(m);
+            if (!(m = ddraw_get_object(&device->handle_table, value - 1, DDRAW_HANDLE_MATERIAL)))
+            {
+                WARN("Invalid material handle.\n");
+                wined3d_mutex_unlock();
+                return DDERR_INVALIDPARAMS;
+            }
+
+            material_activate(m);
+        }
 
         device->material = value;
     }
@@ -3568,15 +3571,11 @@ static HRESULT WINAPI d3d_device7_DrawPrimitive_FPUPreserve(IDirect3DDevice7 *if
 
 static void setup_lighting(const struct d3d_device *device, DWORD fvf, DWORD flags)
 {
-    BOOL enable;
+    BOOL enable = TRUE;
 
     /* Ignore the D3DFVF_XYZRHW case here, wined3d takes care of that */
-    if (flags & D3DDP_DONOTLIGHT)
+    if (!device->material || !(fvf & D3DFVF_NORMAL) || (flags & D3DDP_DONOTLIGHT))
         enable = FALSE;
-    else if (!(fvf & D3DFVF_NORMAL))
-        enable = FALSE;
-    else
-        enable = TRUE;
 
     wined3d_device_set_render_state(device->wined3d_device, WINED3D_RS_LIGHTING, enable);
 }
@@ -4444,8 +4443,8 @@ static HRESULT WINAPI d3d_device3_DrawIndexedPrimitiveVB(IDirect3DDevice3 *iface
  * are passed in the Centers and Radii arrays, the results are passed back
  * in the ReturnValues array. Return values are either completely visible,
  * partially visible or completely invisible.
- * The return value consist of a combination of D3DCLIP_* flags, or it's
- * 0 if the sphere is completely visible(according to the SDK, not checked)
+ * The return value consists of a combination of D3DCLIP_* flags, or is
+ * 0 if the sphere is completely visible (according to the SDK, not checked)
  *
  * Version 3 and 7
  *
@@ -4736,7 +4735,7 @@ static HRESULT WINAPI d3d_device3_SetTexture(IDirect3DDevice3 *iface,
             }
         }
 
-        /* Arg 1/2 are already set to WINED3DTA_TEXTURE/WINED3DTA_CURRENT in case of D3DTBLEND_MODULATE */
+        /* Args 1 and 2 are already set to WINED3DTA_TEXTURE/WINED3DTA_CURRENT in case of D3DTBLEND_MODULATE */
         if (tex_alpha)
             wined3d_device_set_texture_stage_state(device->wined3d_device,
                     0, WINED3D_TSS_ALPHA_OP, WINED3D_TOP_SELECT_ARG1);
@@ -6050,7 +6049,7 @@ static void copy_mipmap_chain(struct d3d_device *device, struct ddraw_surface *d
  *
  * Returns:
  *  D3D_OK on success
- *  DDERR_INVALIDPARAMS if DestTex or SrcTex are NULL, broken coordinates or anything unexpected.
+ *  DDERR_INVALIDPARAMS if dst_texture or src_texture is NULL, broken coordinates or anything unexpected.
  *
  *
  *****************************************************************************/

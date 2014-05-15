@@ -107,6 +107,7 @@ typedef struct event_target_t event_target_t;
     XDIID(DispHTMLStyle) \
     XDIID(DispHTMLStyleElement) \
     XDIID(DispHTMLStyleSheet) \
+    XDIID(DispHTMLStyleSheetRulesCollection) \
     XDIID(DispHTMLStyleSheetsCollection) \
     XDIID(DispHTMLTable) \
     XDIID(DispHTMLTableCell) \
@@ -166,6 +167,7 @@ typedef struct event_target_t event_target_t;
     XIID(IHTMLObjectElement) \
     XIID(IHTMLObjectElement2) \
     XIID(IHTMLOptionElement) \
+    XIID(IHTMLOptionElementFactory) \
     XIID(IHTMLPluginsCollection) \
     XIID(IHTMLRect) \
     XIID(IHTMLScreen) \
@@ -180,6 +182,7 @@ typedef struct event_target_t event_target_t;
     XIID(IHTMLStyle6) \
     XIID(IHTMLStyleElement) \
     XIID(IHTMLStyleSheet) \
+    XIID(IHTMLStyleSheetRulesCollection) \
     XIID(IHTMLStyleSheetsCollection) \
     XIID(IHTMLTable) \
     XIID(IHTMLTable2) \
@@ -316,6 +319,7 @@ typedef struct {
 } global_prop_t;
 
 typedef struct {
+    DispatchEx dispex;
     IHTMLOptionElementFactory IHTMLOptionElementFactory_iface;
 
     LONG ref;
@@ -1022,6 +1026,7 @@ HRESULT set_task_timer(HTMLInnerWindow*,DWORD,BOOL,IDispatch*,LONG*) DECLSPEC_HI
 HRESULT clear_task_timer(HTMLInnerWindow*,BOOL,DWORD) DECLSPEC_HIDDEN;
 
 const char *debugstr_variant(const VARIANT*) DECLSPEC_HIDDEN;
+const char *debugstr_mshtml_guid(const GUID*) DECLSPEC_HIDDEN;
 
 DEFINE_GUID(CLSID_AboutProtocol, 0x3050F406, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_JSProtocol, 0x3050F3B2, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);

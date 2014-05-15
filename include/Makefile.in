@@ -160,6 +160,7 @@ SRCDIR_INCLUDES = \
 	asynot.idl \
 	asysta.idl \
 	atlbase.h \
+	atlcom.h \
 	atlwin.h \
 	audevcod.h \
 	audiosessiontypes.h \
@@ -301,6 +302,7 @@ SRCDIR_INCLUDES = \
 	dsound.h \
 	dsrole.h \
 	dvdmedia.h \
+	dvoice.h \
 	dwmapi.h \
 	dxdiag.h \
 	dxerr8.h \
@@ -362,6 +364,7 @@ SRCDIR_INCLUDES = \
 	ks.h \
 	ksguid.h \
 	ksmedia.h \
+	ksuuids.h \
 	lm.h \
 	lmaccess.h \
 	lmapibuf.h \

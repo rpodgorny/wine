@@ -18,38 +18,252 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define COBJMACROS
+
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
-#include "winuser.h"
 #include "ole2.h"
-#include "oleacc.h"
+
+#include "initguid.h"
+#include "oleacc_private.h"
+#include "resource.h"
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(oleacc);
 
+static const WCHAR lresult_atom_prefix[] = {'w','i','n','e','_','o','l','e','a','c','c',':'};
+
 static HINSTANCE oleacc_handle = 0;
 
-HRESULT WINAPI CreateStdAccessibleObject( HWND hwnd, LONG idObject,
-                             REFIID riidInterface, void** ppvObject )
+const char *debugstr_variant(const VARIANT *v)
 {
-    FIXME("%p %d %s %p\n", hwnd, idObject,
+    if(!v)
+        return "(null)";
+
+    if(V_ISBYREF(v))
+        return wine_dbg_sprintf("{V_BYREF -> %s}", debugstr_variant(V_BYREF(v)));
+
+    switch(V_VT(v)) {
+        case VT_EMPTY:
+            return "{VT_EMPTY}";
+        case VT_NULL:
+            return "{VT_NULL}";
+        case VT_I2:
+            return wine_dbg_sprintf("{VT_I2: %d}", V_I2(v));
+        case VT_I4:
+            return wine_dbg_sprintf("{VT_I4: %d}", V_I4(v));
+        case VT_UI4:
+            return wine_dbg_sprintf("{VT_UI4: %u}", V_UI4(v));
+        case VT_R8:
+            return wine_dbg_sprintf("{VT_R8: %lf}", V_R8(v));
+        case VT_BSTR:
+            return wine_dbg_sprintf("{VT_BSTR: %s}", debugstr_w(V_BSTR(v)));
+        case VT_DISPATCH:
+            return wine_dbg_sprintf("{VT_DISPATCH: %p}", V_DISPATCH(v));
+        case VT_BOOL:
+            return wine_dbg_sprintf("{VT_BOOL: %x}", V_BOOL(v));
+        default:
+            return wine_dbg_sprintf("{vt %d}", V_VT(v));
+    }
+}
+
+int convert_child_id(VARIANT *v)
+{
+    switch(V_VT(v)) {
+    case VT_I4:
+        return V_I4(v);
+    default:
+        FIXME("unhandled child ID variant type: %d\n", V_VT(v));
+        return -1;
+    }
+}
+
+HRESULT WINAPI CreateStdAccessibleObject( HWND hwnd, LONG idObject,
+        REFIID riidInterface, void** ppvObject )
+{
+    WCHAR class_name[64];
+
+    TRACE("%p %d %s %p\n", hwnd, idObject,
           debugstr_guid( riidInterface ), ppvObject );
-    return E_NOTIMPL;
+    if(GetClassNameW(hwnd, class_name, sizeof(class_name)/sizeof(WCHAR)))
+        FIXME("unhandled window class: %s\n", debugstr_w(class_name));
+
+    switch(idObject) {
+    case OBJID_CLIENT:
+        return create_client_object(hwnd, riidInterface, ppvObject);
+    case OBJID_WINDOW:
+        return create_window_object(hwnd, riidInterface, ppvObject);
+    default:
+        FIXME("unhandled object id: %d\n", idObject);
+        return E_NOTIMPL;
+    }
 }
 
 HRESULT WINAPI ObjectFromLresult( LRESULT result, REFIID riid, WPARAM wParam, void **ppObject )
 {
-    FIXME("%ld %s %ld %p\n", result, debugstr_guid(riid), wParam, ppObject );
-    return E_NOTIMPL;
+    WCHAR atom_str[sizeof(lresult_atom_prefix)/sizeof(WCHAR)+3*8+3];
+    HANDLE server_proc, server_mapping, mapping;
+    DWORD proc_id, size;
+    IStream *stream;
+    HGLOBAL data;
+    void *view;
+    HRESULT hr;
+    WCHAR *p;
+
+    TRACE("%ld %s %ld %p\n", result, debugstr_guid(riid), wParam, ppObject );
+
+    if(wParam)
+        FIXME("unsupported wParam = %lx\n", wParam);
+
+    if(!ppObject)
+        return E_INVALIDARG;
+    *ppObject = NULL;
+
+    if(result != (ATOM)result)
+        return E_FAIL;
+
+    if(!GlobalGetAtomNameW(result, atom_str, sizeof(atom_str)/sizeof(WCHAR)))
+        return E_FAIL;
+    if(memcmp(atom_str, lresult_atom_prefix, sizeof(lresult_atom_prefix)))
+        return E_FAIL;
+    p = atom_str + sizeof(lresult_atom_prefix)/sizeof(WCHAR);
+    proc_id = strtoulW(p, &p, 16);
+    if(*p != ':')
+        return E_FAIL;
+    server_mapping = ULongToHandle( strtoulW(p+1, &p, 16) );
+    if(*p != ':')
+        return E_FAIL;
+    size = strtoulW(p+1, &p, 16);
+    if(*p != 0)
+        return E_FAIL;
+
+    server_proc = OpenProcess(PROCESS_DUP_HANDLE, FALSE, proc_id);
+    if(!server_proc)
+        return E_FAIL;
+
+    if(!DuplicateHandle(server_proc, server_mapping, GetCurrentProcess(), &mapping,
+                0, FALSE, DUPLICATE_CLOSE_SOURCE|DUPLICATE_SAME_ACCESS))
+        return E_FAIL;
+    CloseHandle(server_proc);
+    GlobalDeleteAtom(result);
+
+    view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
+    CloseHandle(mapping);
+    if(!view)
+        return E_FAIL;
+
+    data = GlobalAlloc(GMEM_FIXED, size);
+    memcpy(data, view, size);
+    UnmapViewOfFile(view);
+    if(!data)
+        return E_OUTOFMEMORY;
+
+    hr = CreateStreamOnHGlobal(data, TRUE, &stream);
+    if(FAILED(hr)) {
+        GlobalFree(data);
+        return hr;
+    }
+
+    hr = CoUnmarshalInterface(stream, riid, ppObject);
+    IStream_Release(stream);
+    return hr;
 }
 
 LRESULT WINAPI LresultFromObject( REFIID riid, WPARAM wParam, LPUNKNOWN pAcc )
 {
-    FIXME("%s %ld %p\n", debugstr_guid(riid), wParam, pAcc );
-    return E_NOTIMPL;
+    static const WCHAR atom_fmt[] = {'%','0','8','x',':','%','0','8','x',':','%','0','8','x',0};
+    static const LARGE_INTEGER seek_zero = {{0}};
+
+    WCHAR atom_str[sizeof(lresult_atom_prefix)/sizeof(WCHAR)+3*8+3];
+    IStream *stream;
+    HANDLE mapping;
+    STATSTG stat;
+    HRESULT hr;
+    ATOM atom;
+    void *view;
+
+    TRACE("%s %ld %p\n", debugstr_guid(riid), wParam, pAcc);
+
+    if(wParam)
+        FIXME("unsupported wParam = %lx\n", wParam);
+
+    if(!pAcc)
+        return E_INVALIDARG;
+
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    if(FAILED(hr))
+        return hr;
+
+    hr = CoMarshalInterface(stream, riid, pAcc, MSHCTX_LOCAL, NULL, MSHLFLAGS_NORMAL);
+    if(FAILED(hr)) {
+        IStream_Release(stream);
+        return hr;
+    }
+
+    hr = IStream_Seek(stream, seek_zero, STREAM_SEEK_SET, NULL);
+    if(FAILED(hr)) {
+        IStream_Release(stream);
+        return hr;
+    }
+
+    hr = IStream_Stat(stream, &stat, STATFLAG_NONAME);
+    if(FAILED(hr)) {
+        CoReleaseMarshalData(stream);
+        IStream_Release(stream);
+        return hr;
+    }else if(stat.cbSize.u.HighPart) {
+        FIXME("stream size to big\n");
+        CoReleaseMarshalData(stream);
+        IStream_Release(stream);
+        return E_NOTIMPL;
+    }
+
+    mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
+            stat.cbSize.u.HighPart, stat.cbSize.u.LowPart, NULL);
+    if(!mapping) {
+        CoReleaseMarshalData(stream);
+        IStream_Release(stream);
+        return hr;
+    }
+
+    view = MapViewOfFile(mapping, FILE_MAP_WRITE, 0, 0, 0);
+    if(!view) {
+        CloseHandle(mapping);
+        CoReleaseMarshalData(stream);
+        IStream_Release(stream);
+        return E_FAIL;
+    }
+
+    hr = IStream_Read(stream, view, stat.cbSize.u.LowPart, NULL);
+    UnmapViewOfFile(view);
+    if(FAILED(hr)) {
+        CloseHandle(mapping);
+        hr = IStream_Seek(stream, seek_zero, STREAM_SEEK_SET, NULL);
+        if(SUCCEEDED(hr))
+            CoReleaseMarshalData(stream);
+        IStream_Release(stream);
+        return hr;
+
+    }
+
+    memcpy(atom_str, lresult_atom_prefix, sizeof(lresult_atom_prefix));
+    sprintfW(atom_str+sizeof(lresult_atom_prefix)/sizeof(WCHAR),
+             atom_fmt, GetCurrentProcessId(), HandleToUlong(mapping), stat.cbSize.u.LowPart);
+    atom = GlobalAddAtomW(atom_str);
+    if(!atom) {
+        CloseHandle(mapping);
+        hr = IStream_Seek(stream, seek_zero, STREAM_SEEK_SET, NULL);
+        if(SUCCEEDED(hr))
+            CoReleaseMarshalData(stream);
+        IStream_Release(stream);
+        return E_FAIL;
+    }
+
+    IStream_Release(stream);
+    return atom;
 }
 
 HRESULT WINAPI AccessibleObjectFromPoint( POINT ptScreen, IAccessible** ppacc, VARIANT* pvarChild )
@@ -61,9 +275,24 @@ HRESULT WINAPI AccessibleObjectFromPoint( POINT ptScreen, IAccessible** ppacc, V
 HRESULT WINAPI AccessibleObjectFromWindow( HWND hwnd, DWORD dwObjectID,
                              REFIID riid, void** ppvObject )
 {
-    FIXME("%p %d %s %p\n", hwnd, dwObjectID,
+    TRACE("%p %d %s %p\n", hwnd, dwObjectID,
           debugstr_guid( riid ), ppvObject );
-    return E_NOTIMPL;
+
+    if(!ppvObject)
+        return E_INVALIDARG;
+    *ppvObject = NULL;
+
+    if(IsWindow(hwnd)) {
+        LRESULT lres;
+
+        lres = SendMessageW(hwnd, WM_GETOBJECT, 0xffffffff, dwObjectID);
+        if(FAILED(lres))
+            return lres;
+        else if(lres)
+            return ObjectFromLresult(lres, riid, 0, ppvObject);
+    }
+
+    return CreateStdAccessibleObject(hwnd, dwObjectID, riid, ppvObject);
 }
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason,
@@ -103,6 +332,18 @@ void WINAPI GetOleaccVersionInfo(DWORD* pVersion, DWORD* pBuild)
 {
     *pVersion = MAKELONG(0,7); /* Windows 7 version of oleacc: 7.0.0.0 */
     *pBuild = MAKELONG(0,0);
+}
+
+HANDLE WINAPI GetProcessHandleFromHwnd(HWND hwnd)
+{
+    DWORD proc_id;
+
+    TRACE("%p\n", hwnd);
+
+    if(!GetWindowThreadProcessId(hwnd, &proc_id))
+        return NULL;
+    return OpenProcess(PROCESS_DUP_HANDLE | PROCESS_VM_OPERATION |
+            PROCESS_VM_READ | PROCESS_VM_WRITE | SYNCHRONIZE, TRUE, proc_id);
 }
 
 UINT WINAPI GetRoleTextW(DWORD role, LPWSTR lpRole, UINT rolemax)
@@ -159,4 +400,66 @@ UINT WINAPI GetRoleTextA(DWORD role, LPSTR lpRole, UINT rolemax)
     HeapFree(GetProcessHeap(), 0, roletextW);
 
     return length - 1;
+}
+
+UINT WINAPI GetStateTextW(DWORD state_bit, WCHAR *state_str, UINT state_str_len)
+{
+    DWORD state_id;
+
+    TRACE("%x %p %u\n", state_bit, state_str, state_str_len);
+
+    if(state_bit & ~(STATE_SYSTEM_VALID | STATE_SYSTEM_HASPOPUP)) {
+        if(state_str && state_str_len)
+            state_str[0] = 0;
+        return 0;
+    }
+
+    state_id = IDS_STATE_NORMAL;
+    while(state_bit) {
+        state_id++;
+        state_bit /= 2;
+    }
+
+    if(state_str) {
+        UINT ret = LoadStringW(oleacc_handle, state_id, state_str, state_str_len);
+        if(!ret && state_str_len)
+            state_str[0] = 0;
+        return ret;
+    }else {
+        WCHAR *tmp;
+        return LoadStringW(oleacc_handle, state_id, (WCHAR*)&tmp, 0);
+    }
+
+}
+
+UINT WINAPI GetStateTextA(DWORD state_bit, CHAR *state_str, UINT state_str_len)
+{
+    DWORD state_id;
+
+    TRACE("%x %p %u\n", state_bit, state_str, state_str_len);
+
+    if(state_str && !state_str_len)
+        return 0;
+
+    if(state_bit & ~(STATE_SYSTEM_VALID | STATE_SYSTEM_HASPOPUP)) {
+        if(state_str && state_str_len)
+            state_str[0] = 0;
+        return 0;
+    }
+
+    state_id = IDS_STATE_NORMAL;
+    while(state_bit) {
+        state_id++;
+        state_bit /= 2;
+    }
+
+    if(state_str) {
+        UINT ret = LoadStringA(oleacc_handle, state_id, state_str, state_str_len);
+        if(!ret && state_str_len)
+            state_str[0] = 0;
+        return ret;
+    }else {
+        CHAR tmp[256];
+        return LoadStringA(oleacc_handle, state_id, tmp, sizeof(tmp));
+    }
 }

@@ -5598,7 +5598,13 @@ static void test_primary_palette(void)
             0, 0, 640, 480, 0, 0, 0, 0);
     ddraw = create_ddraw();
     ok(!!ddraw, "Failed to create a ddraw object.\n");
-    hr = IDirectDraw7_SetDisplayMode(ddraw, 640, 480, 8, 0, 0);
+    if (FAILED(hr = IDirectDraw7_SetDisplayMode(ddraw, 640, 480, 8, 0, 0)))
+    {
+        win_skip("Failed to set 8 bpp display mode, skipping test.\n");
+        IDirectDraw7_Release(ddraw);
+        DestroyWindow(window);
+        return;
+    }
     ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
     hr = IDirectDraw7_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
@@ -5625,6 +5631,22 @@ static void test_primary_palette(void)
 
     hr = IDirectDrawSurface7_SetPalette(primary, palette);
     ok(SUCCEEDED(hr), "Failed to set palette, hr %#x.\n", hr);
+
+    /* The Windows 8 testbot attaches the palette to the backbuffer as well,
+     * and is generally somewhat broken with respect to 8 bpp / palette
+     * handling. */
+    if (SUCCEEDED(IDirectDrawSurface7_GetPalette(backbuffer, &tmp)))
+    {
+        win_skip("Broken palette handling detected, skipping tests.\n");
+        IDirectDrawPalette_Release(tmp);
+        IDirectDrawPalette_Release(palette);
+        /* The Windows 8 testbot keeps extra references to the primary and
+         * backbuffer while in 8 bpp mode. */
+        hr = IDirectDraw7_RestoreDisplayMode(ddraw);
+        ok(SUCCEEDED(hr), "Failed to restore display mode, hr %#x.\n", hr);
+        goto done;
+    }
+
     refcount = get_refcount((IUnknown *)palette);
     ok(refcount == 2, "Got unexpected refcount %u.\n", refcount);
 
@@ -5665,6 +5687,7 @@ static void test_primary_palette(void)
     hr = IDirectDrawSurface7_GetPalette(primary, &tmp);
     ok(hr == DDERR_NOPALETTEATTACHED, "Got unexpected hr %#x.\n", hr);
 
+done:
     refcount = IDirectDrawSurface7_Release(backbuffer);
     ok(refcount == 1, "Got unexpected refcount %u.\n", refcount);
     refcount = IDirectDrawSurface7_Release(primary);
@@ -6282,7 +6305,7 @@ static void test_create_surface_pitch(void)
                                 DDSD_PITCH,                     0x100},
         {DDSCAPS_VIDEOMEMORY,   DDSD_PITCH,                     0x104,  DD_OK,
                                 DDSD_PITCH,                     0x100},
-        {DDSCAPS_VIDEOMEMORY,   DDSD_PITCH,                     0x0fc,  DD_OK,
+        {DDSCAPS_VIDEOMEMORY,   DDSD_PITCH,                     0x0f8,  DD_OK,
                                 DDSD_PITCH,                     0x100},
         {DDSCAPS_VIDEOMEMORY,   DDSD_LPSURFACE | DDSD_PITCH,    0x100,  DDERR_INVALIDCAPS,
                                 0,                              0    },
@@ -6290,15 +6313,17 @@ static void test_create_surface_pitch(void)
                                 DDSD_PITCH,                     0x100},
         {DDSCAPS_SYSTEMMEMORY,  DDSD_PITCH,                     0x104,  DD_OK,
                                 DDSD_PITCH,                     0x100},
-        {DDSCAPS_SYSTEMMEMORY,  DDSD_PITCH,                     0x0fc,  DD_OK,
+        {DDSCAPS_SYSTEMMEMORY,  DDSD_PITCH,                     0x0f8,  DD_OK,
                                 DDSD_PITCH,                     0x100},
         {DDSCAPS_SYSTEMMEMORY,  DDSD_LPSURFACE,                 0,      DDERR_INVALIDPARAMS,
                                 0,                              0    },
-        {DDSCAPS_SYSTEMMEMORY,  DDSD_LPSURFACE | DDSD_PITCH,    0x104,  DD_OK,
-                                DDSD_PITCH,                     0x104},
-        {DDSCAPS_SYSTEMMEMORY,  DDSD_LPSURFACE | DDSD_PITCH,    0x102,  DDERR_INVALIDPARAMS,
+        {DDSCAPS_SYSTEMMEMORY,  DDSD_LPSURFACE | DDSD_PITCH,    0x100,  DD_OK,
+                                DDSD_PITCH,                     0x100},
+        {DDSCAPS_SYSTEMMEMORY,  DDSD_LPSURFACE | DDSD_PITCH,    0x0fe,  DDERR_INVALIDPARAMS,
                                 0,                              0    },
-        {DDSCAPS_SYSTEMMEMORY,  DDSD_LPSURFACE | DDSD_PITCH,    0x0fc,  DDERR_INVALIDPARAMS,
+        {DDSCAPS_SYSTEMMEMORY,  DDSD_LPSURFACE | DDSD_PITCH,    0x0fc,  DD_OK,
+                                DDSD_PITCH,                     0x0fc},
+        {DDSCAPS_SYSTEMMEMORY,  DDSD_LPSURFACE | DDSD_PITCH,    0x0f8,  DDERR_INVALIDPARAMS,
                                 0,                              0    },
     };
     DWORD flags_mask = DDSD_PITCH | DDSD_LPSURFACE;
@@ -6310,7 +6335,7 @@ static void test_create_surface_pitch(void)
     hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
-    mem = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, ((64 * 4) + 4) * 64);
+    mem = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, ((63 * 4) + 8) * 63);
 
     for (i = 0; i < sizeof(test_data) / sizeof(*test_data); ++i)
     {
@@ -6318,8 +6343,8 @@ static void test_create_surface_pitch(void)
         surface_desc.dwSize = sizeof(surface_desc);
         surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | test_data[i].flags_in;
         surface_desc.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN | test_data[i].placement;
-        surface_desc.dwWidth = 64;
-        surface_desc.dwHeight = 64;
+        surface_desc.dwWidth = 63;
+        surface_desc.dwHeight = 63;
         U1(surface_desc).lPitch = test_data[i].pitch_in;
         surface_desc.lpSurface = mem;
         U4(surface_desc).ddpfPixelFormat.dwSize = sizeof(U4(surface_desc).ddpfPixelFormat);
@@ -6415,6 +6440,726 @@ static void test_mipmap_lock(void)
     DestroyWindow(window);
 }
 
+static void test_palette_complex(void)
+{
+    IDirectDrawSurface7 *surface, *mipmap, *tmp;
+    DDSURFACEDESC2 surface_desc;
+    IDirectDraw7 *ddraw;
+    IDirectDrawPalette *palette, *palette2;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+    DDSCAPS2 caps = {DDSCAPS_COMPLEX, 0, 0, 0};
+    DDCAPS hal_caps;
+    PALETTEENTRY palette_entries[256];
+    unsigned int i;
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    hr = IDirectDraw7_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
+
+    memset(&hal_caps, 0, sizeof(hal_caps));
+    hal_caps.dwSize = sizeof(hal_caps);
+    hr = IDirectDraw7_GetCaps(ddraw, &hal_caps, NULL);
+    ok(SUCCEEDED(hr), "Failed to get caps, hr %#x.\n", hr);
+    if ((hal_caps.ddsCaps.dwCaps & (DDSCAPS_TEXTURE | DDSCAPS_MIPMAP)) != (DDSCAPS_TEXTURE | DDSCAPS_MIPMAP))
+    {
+        skip("Mipmapped textures not supported, skipping mipmap palette test.\n");
+        IDirectDraw7_Release(ddraw);
+        DestroyWindow(window);
+        return;
+    }
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+    surface_desc.dwWidth = 128;
+    surface_desc.dwHeight = 128;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP;
+    U4(surface_desc).ddpfPixelFormat.dwSize = sizeof(U4(surface_desc).ddpfPixelFormat);
+    U4(surface_desc).ddpfPixelFormat.dwFlags = DDPF_PALETTEINDEXED8 | DDPF_RGB;
+    U1(U4(surface_desc).ddpfPixelFormat).dwRGBBitCount = 8;
+    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &surface, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+
+    memset(palette_entries, 0, sizeof(palette_entries));
+    hr = IDirectDraw7_CreatePalette(ddraw, DDPCAPS_8BIT | DDPCAPS_ALLOW256,
+            palette_entries, &palette, NULL);
+    ok(SUCCEEDED(hr), "Failed to create palette, hr %#x.\n", hr);
+
+    palette2 = (void *)0xdeadbeef;
+    hr = IDirectDrawSurface7_GetPalette(surface, &palette2);
+    ok(hr == DDERR_NOPALETTEATTACHED, "Got unexpected hr %#x.\n", hr);
+    ok(!palette2, "Got unexpected palette %p.\n", palette2);
+    hr = IDirectDrawSurface7_SetPalette(surface, palette);
+    ok(SUCCEEDED(hr), "Failed to set palette, hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_GetPalette(surface, &palette2);
+    ok(SUCCEEDED(hr), "Failed to get palette, hr %#x.\n", hr);
+    ok(palette == palette2, "Got unexpected palette %p.\n", palette2);
+    IDirectDrawPalette_Release(palette2);
+
+    mipmap = surface;
+    IDirectDrawSurface7_AddRef(mipmap);
+    for (i = 0; i < 7; ++i)
+    {
+        hr = IDirectDrawSurface7_GetAttachedSurface(mipmap, &caps, &tmp);
+        ok(SUCCEEDED(hr), "Failed to get attached surface, i %u, hr %#x.\n", i, hr);
+        palette2 = (void *)0xdeadbeef;
+        hr = IDirectDrawSurface7_GetPalette(tmp, &palette2);
+        ok(hr == DDERR_NOPALETTEATTACHED, "Got unexpected hr %#x, i %u.\n", hr, i);
+        ok(!palette2, "Got unexpected palette %p, i %u.\n", palette2, i);
+
+        hr = IDirectDrawSurface7_SetPalette(tmp, palette);
+        ok(hr == DDERR_NOTONMIPMAPSUBLEVEL, "Got unexpected hr %#x, i %u.\n", hr, i);
+
+        hr = IDirectDrawSurface7_GetPalette(tmp, &palette2);
+        ok(hr == DDERR_NOPALETTEATTACHED, "Got unexpected hr %#x, i %u.\n", hr, i);
+        ok(!palette2, "Got unexpected palette %p, i %u.\n", palette2, i);
+
+        /* Ddraw7 uses the palette of the mipmap for GetDC, just like previous
+         * ddraw versions. Combined with the test results above this means no
+         * palette is available. So depending on the driver either GetDC fails
+         * or the DIB color table contains random data. */
+
+        IDirectDrawSurface7_Release(mipmap);
+        mipmap = tmp;
+    }
+
+    hr = IDirectDrawSurface7_GetAttachedSurface(mipmap, &caps, &tmp);
+    ok(hr == DDERR_NOTFOUND, "Got unexpected hr %#x.\n", hr);
+    IDirectDrawSurface7_Release(mipmap);
+    refcount = IDirectDrawSurface7_Release(surface);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+
+    /* Test DDERR_INVALIDPIXELFORMAT vs DDERR_NOTONMIPMAPSUBLEVEL. */
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+    surface_desc.dwWidth = 128;
+    surface_desc.dwHeight = 128;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP;
+    U4(surface_desc).ddpfPixelFormat.dwSize = sizeof(U4(surface_desc).ddpfPixelFormat);
+    U4(surface_desc).ddpfPixelFormat.dwFlags = DDPF_RGB;
+    U1(U4(surface_desc).ddpfPixelFormat).dwRGBBitCount = 32;
+    U2(U4(surface_desc).ddpfPixelFormat).dwRBitMask = 0x00ff0000;
+    U3(U4(surface_desc).ddpfPixelFormat).dwGBitMask = 0x0000ff00;
+    U4(U4(surface_desc).ddpfPixelFormat).dwBBitMask = 0x000000ff;
+    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &surface, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+
+    hr = IDirectDrawSurface7_GetAttachedSurface(surface, &caps, &mipmap);
+    ok(SUCCEEDED(hr), "Failed to get attached surface, hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_SetPalette(mipmap, palette);
+    ok(hr == DDERR_NOTONMIPMAPSUBLEVEL, "Got unexpected hr %#x.\n", hr);
+
+    IDirectDrawSurface7_Release(mipmap);
+    refcount = IDirectDrawSurface7_Release(surface);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+    refcount = IDirectDrawPalette_Release(palette);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+
+    refcount = IDirectDraw7_Release(ddraw);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+    DestroyWindow(window);
+}
+
+static void test_p8_rgb_blit(void)
+{
+    IDirectDrawSurface7 *src, *dst;
+    DDSURFACEDESC2 surface_desc;
+    IDirectDraw7 *ddraw;
+    IDirectDrawPalette *palette;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+    PALETTEENTRY palette_entries[256];
+    unsigned int x;
+    static const BYTE src_data[] = {0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0xff, 0x80};
+    static const D3DCOLOR expected[] =
+    {
+        0x00000000, 0x00010101, 0x00020202, 0x00030303,
+        0x00040404, 0x00050505, 0x00ffffff, 0x00808080,
+    };
+    D3DCOLOR color;
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    hr = IDirectDraw7_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
+
+    memset(palette_entries, 0, sizeof(palette_entries));
+    palette_entries[0].peRed = 0xff;
+    palette_entries[1].peGreen = 0xff;
+    palette_entries[2].peBlue = 0xff;
+    palette_entries[3].peFlags = 0xff;
+    hr = IDirectDraw7_CreatePalette(ddraw, DDPCAPS_8BIT | DDPCAPS_ALLOW256,
+            palette_entries, &palette, NULL);
+    ok(SUCCEEDED(hr), "Failed to create palette, hr %#x.\n", hr);
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+    surface_desc.dwWidth = 8;
+    surface_desc.dwHeight = 1;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+    U4(surface_desc).ddpfPixelFormat.dwSize = sizeof(U4(surface_desc).ddpfPixelFormat);
+    U4(surface_desc).ddpfPixelFormat.dwFlags = DDPF_PALETTEINDEXED8 | DDPF_RGB;
+    U1(U4(surface_desc).ddpfPixelFormat).dwRGBBitCount = 8;
+    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &src, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+    surface_desc.dwWidth = 8;
+    surface_desc.dwHeight = 1;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+    U4(surface_desc).ddpfPixelFormat.dwSize = sizeof(U4(surface_desc).ddpfPixelFormat);
+    U4(surface_desc).ddpfPixelFormat.dwFlags = DDPF_RGB | DDPF_ALPHAPIXELS;
+    U1(U4(surface_desc).ddpfPixelFormat).dwRGBBitCount = 32;
+    U2(U4(surface_desc).ddpfPixelFormat).dwRBitMask = 0x00ff0000;
+    U3(U4(surface_desc).ddpfPixelFormat).dwGBitMask = 0x0000ff00;
+    U4(U4(surface_desc).ddpfPixelFormat).dwBBitMask = 0x000000ff;
+    U5(U4(surface_desc).ddpfPixelFormat).dwRGBAlphaBitMask = 0xff000000;
+    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &dst, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    hr = IDirectDrawSurface7_Lock(src, NULL, &surface_desc, 0, NULL);
+    ok(SUCCEEDED(hr), "Failed to lock source surface, hr %#x.\n", hr);
+    memcpy(surface_desc.lpSurface, src_data, sizeof(src_data));
+    hr = IDirectDrawSurface7_Unlock(src, NULL);
+    ok(SUCCEEDED(hr), "Failed to unlock source surface, hr %#x.\n", hr);
+
+    hr = IDirectDrawSurface7_SetPalette(src, palette);
+    ok(SUCCEEDED(hr), "Failed to set palette, hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_Blt(dst, NULL, src, NULL, DDBLT_WAIT, NULL);
+    /* The r500 Windows 7 driver returns E_NOTIMPL. r200 on Windows XP works.
+     * The Geforce 7 driver on Windows Vista returns E_FAIL. Newer Nvidia GPUs work. */
+    ok(SUCCEEDED(hr) || broken(hr == E_NOTIMPL) || broken(hr == E_FAIL),
+            "Failed to blit, hr %#x.\n", hr);
+
+    if (SUCCEEDED(hr))
+    {
+        for (x = 0; x < sizeof(expected) / sizeof(*expected); x++)
+        {
+            color = get_surface_color(dst, x, 0);
+            todo_wine ok(compare_color(color, expected[x], 0),
+                    "Pixel %u: Got color %#x, expected %#x.\n",
+                    x, color, expected[x]);
+        }
+    }
+
+    IDirectDrawSurface7_Release(src);
+    IDirectDrawSurface7_Release(dst);
+    IDirectDrawPalette_Release(palette);
+
+    refcount = IDirectDraw7_Release(ddraw);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+    DestroyWindow(window);
+}
+
+static void test_material(void)
+{
+    static const D3DCOLORVALUE null_color;
+    IDirect3DDevice7 *device;
+    D3DMATERIAL7 material;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+    if (!(device = create_device(window, DDSCL_NORMAL)))
+    {
+        skip("Failed to create a 3D device, skipping test.\n");
+        DestroyWindow(window);
+        return;
+    }
+
+    hr = IDirect3DDevice7_GetMaterial(device, &material);
+    ok(SUCCEEDED(hr), "Failed to get material, hr %#x.\n", hr);
+    ok(!memcmp(&U(material).diffuse, &null_color, sizeof(null_color)),
+            "Got unexpected diffuse color {%.8e, %.8e, %.8e, %.8e}.\n",
+            U1(U(material).diffuse).r, U2(U(material).diffuse).g,
+            U3(U(material).diffuse).b, U4(U(material).diffuse).a);
+    ok(!memcmp(&U1(material).ambient, &null_color, sizeof(null_color)),
+            "Got unexpected ambient color {%.8e, %.8e, %.8e, %.8e}.\n",
+            U1(U1(material).ambient).r, U2(U1(material).ambient).g,
+            U3(U1(material).ambient).b, U4(U1(material).ambient).a);
+    ok(!memcmp(&U2(material).specular, &null_color, sizeof(null_color)),
+            "Got unexpected specular color {%.8e, %.8e, %.8e, %.8e}.\n",
+            U1(U2(material).specular).r, U2(U2(material).specular).g,
+            U3(U2(material).specular).b, U4(U2(material).specular).a);
+    ok(!memcmp(&U3(material).emissive, &null_color, sizeof(null_color)),
+            "Got unexpected emissive color {%.8e, %.8e, %.8e, %.8e}.\n",
+            U1(U3(material).emissive).r, U2(U3(material).emissive).g,
+            U3(U3(material).emissive).b, U4(U3(material).emissive).a);
+    ok(U4(material).power == 0.0f, "Got unexpected power %.8e.\n", U4(material).power);
+
+    refcount = IDirect3DDevice7_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    DestroyWindow(window);
+}
+
+static void test_palette_gdi(void)
+{
+    IDirectDrawSurface7 *surface, *primary;
+    DDSURFACEDESC2 surface_desc;
+    IDirectDraw7 *ddraw;
+    IDirectDrawPalette *palette, *palette2;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+    PALETTEENTRY palette_entries[256];
+    UINT i;
+    HDC dc;
+    /* On the Windows 8 testbot palette index 0 of the onscreen palette is forced to
+     * r = 0, g = 0, b = 0. Do not attempt to set it to something else as this is
+     * not the point of this test. */
+    static const RGBQUAD expected1[] =
+    {
+        {0x00, 0x00, 0x00, 0x00}, {0x00, 0x00, 0x01, 0x00}, {0x00, 0x02, 0x00, 0x00},
+        {0x03, 0x00, 0x00, 0x00}, {0x15, 0x14, 0x13, 0x00},
+    };
+    static const RGBQUAD expected2[] =
+    {
+        {0x00, 0x00, 0x00, 0x00}, {0x00, 0x00, 0x01, 0x00}, {0x00, 0x02, 0x00, 0x00},
+        {0x03, 0x00, 0x00, 0x00}, {0x25, 0x24, 0x23, 0x00},
+    };
+    static const RGBQUAD expected3[] =
+    {
+        {0x00, 0x00, 0x00, 0x00}, {0x40, 0x00, 0x00, 0x00}, {0x00, 0x00, 0x40, 0x00},
+        {0x00, 0x40, 0x00, 0x00}, {0x56, 0x34, 0x12, 0x00},
+    };
+    HPALETTE ddraw_palette_handle;
+    /* Similar to index 0, index 255 is r = 0xff, g = 0xff, b = 0xff on the Win8 VMs. */
+    RGBQUAD rgbquad[255];
+    static const RGBQUAD rgb_zero = {0, 0, 0, 0};
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    hr = IDirectDraw7_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+    surface_desc.dwWidth = 16;
+    surface_desc.dwHeight = 16;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+    U4(surface_desc).ddpfPixelFormat.dwSize = sizeof(U4(surface_desc).ddpfPixelFormat);
+    U4(surface_desc).ddpfPixelFormat.dwFlags = DDPF_PALETTEINDEXED8 | DDPF_RGB;
+    U1(U4(surface_desc).ddpfPixelFormat).dwRGBBitCount = 8;
+    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &surface, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+
+    /* Avoid colors from the Windows default palette. */
+    memset(palette_entries, 0, sizeof(palette_entries));
+    palette_entries[1].peRed = 0x01;
+    palette_entries[2].peGreen = 0x02;
+    palette_entries[3].peBlue = 0x03;
+    palette_entries[4].peRed = 0x13;
+    palette_entries[4].peGreen = 0x14;
+    palette_entries[4].peBlue = 0x15;
+    hr = IDirectDraw7_CreatePalette(ddraw, DDPCAPS_8BIT | DDPCAPS_ALLOW256,
+            palette_entries, &palette, NULL);
+    ok(SUCCEEDED(hr), "Failed to create palette, hr %#x.\n", hr);
+
+    /* If there is no palette assigned and the display mode is not 8 bpp, some
+     * drivers refuse to create a DC while others allow it. If a DC is created,
+     * the DIB color table is uninitialized and contains random colors. No error
+     * is generated when trying to read pixels and random garbage is returned.
+     *
+     * The most likely explanation is that if the driver creates a DC, it (or
+     * the higher-level runtime) uses GetSystemPaletteEntries to find the
+     * palette, but GetSystemPaletteEntries fails when bpp > 8 and the palette
+     * contains uninitialized garbage. See comments below for the P8 case. */
+
+    hr = IDirectDrawSurface7_SetPalette(surface, palette);
+    ok(SUCCEEDED(hr), "Failed to set palette, hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_GetDC(surface, &dc);
+    ok(SUCCEEDED(hr), "Failed to get DC, hr %#x.\n", hr);
+    ddraw_palette_handle = SelectPalette(dc, GetStockObject(DEFAULT_PALETTE), FALSE);
+    ok(ddraw_palette_handle == GetStockObject(DEFAULT_PALETTE),
+            "Got unexpected palette %p, expected %p.\n",
+            ddraw_palette_handle, GetStockObject(DEFAULT_PALETTE));
+
+    i = GetDIBColorTable(dc, 0, sizeof(rgbquad) / sizeof(*rgbquad), rgbquad);
+    ok(i == sizeof(rgbquad) / sizeof(*rgbquad), "Expected count 255, got %u.\n", i);
+    for (i = 0; i < sizeof(expected1) / sizeof(*expected1); i++)
+    {
+        ok(!memcmp(&rgbquad[i], &expected1[i], sizeof(rgbquad[i])),
+                "Got color table entry %u r=%#x g=%#x b=%#x, expected r=%#x g=%#x b=%#x.\n",
+                i, rgbquad[i].rgbRed, rgbquad[i].rgbGreen, rgbquad[i].rgbBlue,
+                expected1[i].rgbRed, expected1[i].rgbGreen, expected1[i].rgbBlue);
+    }
+    for (; i < sizeof(rgbquad) / sizeof(*rgbquad); i++)
+    {
+        ok(!memcmp(&rgbquad[i], &rgb_zero, sizeof(rgbquad[i])),
+                "Got color table entry %u r=%#x g=%#x b=%#x, expected r=0 g=0 b=0.\n",
+                i, rgbquad[i].rgbRed, rgbquad[i].rgbGreen, rgbquad[i].rgbBlue);
+    }
+
+    /* Update the palette while the DC is in use. This does not modify the DC. */
+    palette_entries[4].peRed = 0x23;
+    palette_entries[4].peGreen = 0x24;
+    palette_entries[4].peBlue = 0x25;
+    hr = IDirectDrawPalette_SetEntries(palette, 0, 4, 1, &palette_entries[4]);
+    ok(SUCCEEDED(hr), "Failed to set palette entries, hr %#x.\n", hr);
+
+    i = GetDIBColorTable(dc, 4, 1, &rgbquad[4]);
+    ok(i == 1, "Expected count 1, got %u.\n", i);
+    ok(!memcmp(&rgbquad[4], &expected1[4], sizeof(rgbquad[4])),
+            "Got color table entry %u r=%#x g=%#x b=%#x, expected r=%#x g=%#x b=%#x.\n",
+            i, rgbquad[4].rgbRed, rgbquad[4].rgbGreen, rgbquad[4].rgbBlue,
+            expected1[4].rgbRed, expected1[4].rgbGreen, expected1[4].rgbBlue);
+
+    /* Neither does re-setting the palette. */
+    hr = IDirectDrawSurface7_SetPalette(surface, NULL);
+    ok(SUCCEEDED(hr), "Failed to set palette, hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_SetPalette(surface, palette);
+    ok(SUCCEEDED(hr), "Failed to set palette, hr %#x.\n", hr);
+
+    i = GetDIBColorTable(dc, 4, 1, &rgbquad[4]);
+    ok(i == 1, "Expected count 1, got %u.\n", i);
+    ok(!memcmp(&rgbquad[4], &expected1[4], sizeof(rgbquad[4])),
+            "Got color table entry %u r=%#x g=%#x b=%#x, expected r=%#x g=%#x b=%#x.\n",
+            i, rgbquad[4].rgbRed, rgbquad[4].rgbGreen, rgbquad[4].rgbBlue,
+            expected1[4].rgbRed, expected1[4].rgbGreen, expected1[4].rgbBlue);
+
+    hr = IDirectDrawSurface7_ReleaseDC(surface, dc);
+    ok(SUCCEEDED(hr), "Failed to release DC, hr %#x.\n", hr);
+
+    /* Refresh the DC. This updates the palette. */
+    hr = IDirectDrawSurface7_GetDC(surface, &dc);
+    ok(SUCCEEDED(hr), "Failed to get DC, hr %#x.\n", hr);
+    i = GetDIBColorTable(dc, 0, sizeof(rgbquad) / sizeof(*rgbquad), rgbquad);
+    ok(i == sizeof(rgbquad) / sizeof(*rgbquad), "Expected count 255, got %u.\n", i);
+    for (i = 0; i < sizeof(expected2) / sizeof(*expected2); i++)
+    {
+        ok(!memcmp(&rgbquad[i], &expected2[i], sizeof(rgbquad[i])),
+                "Got color table entry %u r=%#x g=%#x b=%#x, expected r=%#x g=%#x b=%#x.\n",
+                i, rgbquad[i].rgbRed, rgbquad[i].rgbGreen, rgbquad[i].rgbBlue,
+                expected2[i].rgbRed, expected2[i].rgbGreen, expected2[i].rgbBlue);
+    }
+    for (; i < sizeof(rgbquad) / sizeof(*rgbquad); i++)
+    {
+        ok(!memcmp(&rgbquad[i], &rgb_zero, sizeof(rgbquad[i])),
+                "Got color table entry %u r=%#x g=%#x b=%#x, expected r=0 g=0 b=0.\n",
+                i, rgbquad[i].rgbRed, rgbquad[i].rgbGreen, rgbquad[i].rgbBlue);
+    }
+    hr = IDirectDrawSurface7_ReleaseDC(surface, dc);
+    ok(SUCCEEDED(hr), "Failed to release DC, hr %#x.\n", hr);
+
+    refcount = IDirectDrawSurface7_Release(surface);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+
+    if (FAILED(hr = IDirectDraw7_SetDisplayMode(ddraw, 640, 480, 8, 0, 0)))
+    {
+        win_skip("Failed to set 8 bpp display mode, skipping test.\n");
+        IDirectDrawPalette_Release(palette);
+        IDirectDraw7_Release(ddraw);
+        DestroyWindow(window);
+        return;
+    }
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
+    hr = IDirectDraw7_SetCooperativeLevel(ddraw, window, DDSCL_FULLSCREEN | DDSCL_EXCLUSIVE);
+    ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE;
+    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &primary, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+
+    hr = IDirectDrawSurface7_SetPalette(primary, palette);
+    ok(SUCCEEDED(hr), "Failed to set palette, hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_GetDC(primary, &dc);
+    ok(SUCCEEDED(hr), "Failed to get DC, hr %#x.\n", hr);
+    ddraw_palette_handle = SelectPalette(dc, GetStockObject(DEFAULT_PALETTE), FALSE);
+    /* Windows 2000 on the testbot assigns a different palette to the primary. Refrast? */
+    ok(ddraw_palette_handle == GetStockObject(DEFAULT_PALETTE) || broken(TRUE),
+            "Got unexpected palette %p, expected %p.\n",
+            ddraw_palette_handle, GetStockObject(DEFAULT_PALETTE));
+    SelectPalette(dc, ddraw_palette_handle, FALSE);
+
+    /* The primary uses the system palette. In exclusive mode, the system palette matches
+     * the ddraw palette attached to the primary, so the result is what you would expect
+     * from a regular surface. Tests for the interaction between the ddraw palette and
+     * the system palette are not included pending an application that depends on this.
+     * The relation between those causes problems on Windows Vista and newer for games
+     * like Age of Empires or Starcraft. Don't emulate it without a real need. */
+    i = GetDIBColorTable(dc, 0, sizeof(rgbquad) / sizeof(*rgbquad), rgbquad);
+    ok(i == sizeof(rgbquad) / sizeof(*rgbquad), "Expected count 255, got %u.\n", i);
+    for (i = 0; i < sizeof(expected2) / sizeof(*expected2); i++)
+    {
+        ok(!memcmp(&rgbquad[i], &expected2[i], sizeof(rgbquad[i])),
+                "Got color table entry %u r=%#x g=%#x b=%#x, expected r=%#x g=%#x b=%#x.\n",
+                i, rgbquad[i].rgbRed, rgbquad[i].rgbGreen, rgbquad[i].rgbBlue,
+                expected2[i].rgbRed, expected2[i].rgbGreen, expected2[i].rgbBlue);
+    }
+    for (; i < sizeof(rgbquad) / sizeof(*rgbquad); i++)
+    {
+        ok(!memcmp(&rgbquad[i], &rgb_zero, sizeof(rgbquad[i])),
+                "Got color table entry %u r=%#x g=%#x b=%#x, expected r=0 g=0 b=0.\n",
+                i, rgbquad[i].rgbRed, rgbquad[i].rgbGreen, rgbquad[i].rgbBlue);
+    }
+    hr = IDirectDrawSurface7_ReleaseDC(primary, dc);
+    ok(SUCCEEDED(hr), "Failed to release DC, hr %#x.\n", hr);
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+    surface_desc.dwWidth = 16;
+    surface_desc.dwHeight = 16;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &surface, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+
+    /* Here the offscreen surface appears to use the primary's palette,
+     * but in all likelyhood it is actually the system palette. */
+    hr = IDirectDrawSurface7_GetDC(surface, &dc);
+    ok(SUCCEEDED(hr), "Failed to get DC, hr %#x.\n", hr);
+    i = GetDIBColorTable(dc, 0, sizeof(rgbquad) / sizeof(*rgbquad), rgbquad);
+    ok(i == sizeof(rgbquad) / sizeof(*rgbquad), "Expected count 255, got %u.\n", i);
+    for (i = 0; i < sizeof(expected2) / sizeof(*expected2); i++)
+    {
+        ok(!memcmp(&rgbquad[i], &expected2[i], sizeof(rgbquad[i])),
+                "Got color table entry %u r=%#x g=%#x b=%#x, expected r=%#x g=%#x b=%#x.\n",
+                i, rgbquad[i].rgbRed, rgbquad[i].rgbGreen, rgbquad[i].rgbBlue,
+                expected2[i].rgbRed, expected2[i].rgbGreen, expected2[i].rgbBlue);
+    }
+    for (; i < sizeof(rgbquad) / sizeof(*rgbquad); i++)
+    {
+        ok(!memcmp(&rgbquad[i], &rgb_zero, sizeof(rgbquad[i])),
+                "Got color table entry %u r=%#x g=%#x b=%#x, expected r=0 g=0 b=0.\n",
+                i, rgbquad[i].rgbRed, rgbquad[i].rgbGreen, rgbquad[i].rgbBlue);
+    }
+    hr = IDirectDrawSurface7_ReleaseDC(surface, dc);
+    ok(SUCCEEDED(hr), "Failed to release DC, hr %#x.\n", hr);
+
+    /* On real hardware a change to the primary surface's palette applies immediately,
+     * even on device contexts from offscreen surfaces that do not have their own
+     * palette. On the testbot VMs this is not the case. Don't test this until we
+     * know of an application that depends on this. */
+
+    memset(palette_entries, 0, sizeof(palette_entries));
+    palette_entries[1].peBlue = 0x40;
+    palette_entries[2].peRed = 0x40;
+    palette_entries[3].peGreen = 0x40;
+    palette_entries[4].peRed = 0x12;
+    palette_entries[4].peGreen = 0x34;
+    palette_entries[4].peBlue = 0x56;
+    hr = IDirectDraw7_CreatePalette(ddraw, DDPCAPS_8BIT | DDPCAPS_ALLOW256,
+            palette_entries, &palette2, NULL);
+    ok(SUCCEEDED(hr), "Failed to create palette, hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_SetPalette(surface, palette2);
+    ok(SUCCEEDED(hr), "Failed to set palette, hr %#x.\n", hr);
+
+    /* A palette assigned to the offscreen surface overrides the primary / system
+     * palette. */
+    hr = IDirectDrawSurface7_GetDC(surface, &dc);
+    ok(SUCCEEDED(hr), "Failed to get DC, hr %#x.\n", hr);
+    i = GetDIBColorTable(dc, 0, sizeof(rgbquad) / sizeof(*rgbquad), rgbquad);
+    ok(i == sizeof(rgbquad) / sizeof(*rgbquad), "Expected count 255, got %u.\n", i);
+    for (i = 0; i < sizeof(expected3) / sizeof(*expected3); i++)
+    {
+        ok(!memcmp(&rgbquad[i], &expected3[i], sizeof(rgbquad[i])),
+                "Got color table entry %u r=%#x g=%#x b=%#x, expected r=%#x g=%#x b=%#x.\n",
+                i, rgbquad[i].rgbRed, rgbquad[i].rgbGreen, rgbquad[i].rgbBlue,
+                expected3[i].rgbRed, expected3[i].rgbGreen, expected3[i].rgbBlue);
+    }
+    for (; i < sizeof(rgbquad) / sizeof(*rgbquad); i++)
+    {
+        ok(!memcmp(&rgbquad[i], &rgb_zero, sizeof(rgbquad[i])),
+                "Got color table entry %u r=%#x g=%#x b=%#x, expected r=0 g=0 b=0.\n",
+                i, rgbquad[i].rgbRed, rgbquad[i].rgbGreen, rgbquad[i].rgbBlue);
+    }
+    hr = IDirectDrawSurface7_ReleaseDC(surface, dc);
+    ok(SUCCEEDED(hr), "Failed to release DC, hr %#x.\n", hr);
+
+    refcount = IDirectDrawSurface7_Release(surface);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+
+    /* The Windows 8 testbot keeps extra references to the primary and
+     * backbuffer while in 8 bpp mode. */
+    hr = IDirectDraw7_RestoreDisplayMode(ddraw);
+    ok(SUCCEEDED(hr), "Failed to restore display mode, hr %#x.\n", hr);
+
+    refcount = IDirectDrawSurface7_Release(primary);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+    refcount = IDirectDrawPalette_Release(palette2);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+    refcount = IDirectDrawPalette_Release(palette);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+    refcount = IDirectDraw7_Release(ddraw);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+    DestroyWindow(window);
+}
+
+static void test_palette_alpha(void)
+{
+    IDirectDrawSurface7 *surface;
+    DDSURFACEDESC2 surface_desc;
+    IDirectDraw7 *ddraw;
+    IDirectDrawPalette *palette;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+    PALETTEENTRY palette_entries[256];
+    unsigned int i;
+    static const struct
+    {
+        DWORD caps, flags;
+        BOOL attach_allowed;
+        const char *name;
+    }
+    test_data[] =
+    {
+        {DDSCAPS_OFFSCREENPLAIN, DDSD_WIDTH | DDSD_HEIGHT, FALSE, "offscreenplain"},
+        {DDSCAPS_TEXTURE, DDSD_WIDTH | DDSD_HEIGHT, TRUE, "texture"},
+        {DDSCAPS_PRIMARYSURFACE, 0, FALSE, "primary"}
+    };
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    if (FAILED(hr = IDirectDraw7_SetDisplayMode(ddraw, 640, 480, 8, 0, 0)))
+    {
+        win_skip("Failed to set 8 bpp display mode, skipping test.\n");
+        IDirectDraw7_Release(ddraw);
+        DestroyWindow(window);
+        return;
+    }
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
+    hr = IDirectDraw7_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
+
+    memset(palette_entries, 0, sizeof(palette_entries));
+    palette_entries[1].peFlags = 0x42;
+    palette_entries[2].peFlags = 0xff;
+    palette_entries[3].peFlags = 0x80;
+    hr = IDirectDraw7_CreatePalette(ddraw, DDPCAPS_ALLOW256 | DDPCAPS_8BIT, palette_entries, &palette, NULL);
+    ok(SUCCEEDED(hr), "Failed to create palette, hr %#x.\n", hr);
+
+    memset(palette_entries, 0x66, sizeof(palette_entries));
+    hr = IDirectDrawPalette_GetEntries(palette, 0, 1, 4, palette_entries);
+    ok(SUCCEEDED(hr), "Failed to get palette entries, hr %#x.\n", hr);
+    ok(palette_entries[0].peFlags == 0x42, "Got unexpected peFlags 0x%02x, expected 0xff.\n",
+            palette_entries[0].peFlags);
+    ok(palette_entries[1].peFlags == 0xff, "Got unexpected peFlags 0x%02x, expected 0xff.\n",
+            palette_entries[1].peFlags);
+    ok(palette_entries[2].peFlags == 0x80, "Got unexpected peFlags 0x%02x, expected 0x80.\n",
+            palette_entries[2].peFlags);
+    ok(palette_entries[3].peFlags == 0x00, "Got unexpected peFlags 0x%02x, expected 0x00.\n",
+            palette_entries[3].peFlags);
+
+    IDirectDrawPalette_Release(palette);
+
+    memset(palette_entries, 0, sizeof(palette_entries));
+    palette_entries[1].peFlags = 0x42;
+    palette_entries[1].peRed   = 0xff;
+    palette_entries[2].peFlags = 0xff;
+    palette_entries[3].peFlags = 0x80;
+    hr = IDirectDraw7_CreatePalette(ddraw, DDPCAPS_ALLOW256 | DDPCAPS_8BIT | DDPCAPS_ALPHA,
+            palette_entries, &palette, NULL);
+    ok(SUCCEEDED(hr), "Failed to create palette, hr %#x.\n", hr);
+
+    memset(palette_entries, 0x66, sizeof(palette_entries));
+    hr = IDirectDrawPalette_GetEntries(palette, 0, 1, 4, palette_entries);
+    ok(SUCCEEDED(hr), "Failed to get palette entries, hr %#x.\n", hr);
+    ok(palette_entries[0].peFlags == 0x42, "Got unexpected peFlags 0x%02x, expected 0xff.\n",
+            palette_entries[0].peFlags);
+    ok(palette_entries[1].peFlags == 0xff, "Got unexpected peFlags 0x%02x, expected 0xff.\n",
+            palette_entries[1].peFlags);
+    ok(palette_entries[2].peFlags == 0x80, "Got unexpected peFlags 0x%02x, expected 0x80.\n",
+            palette_entries[2].peFlags);
+    ok(palette_entries[3].peFlags == 0x00, "Got unexpected peFlags 0x%02x, expected 0x00.\n",
+            palette_entries[3].peFlags);
+
+    for (i = 0; i < sizeof(test_data) / sizeof(*test_data); i++)
+    {
+        memset(&surface_desc, 0, sizeof(surface_desc));
+        surface_desc.dwSize = sizeof(surface_desc);
+        surface_desc.dwFlags = DDSD_CAPS | test_data[i].flags;
+        surface_desc.dwWidth = 128;
+        surface_desc.dwHeight = 128;
+        surface_desc.ddsCaps.dwCaps = test_data[i].caps;
+        hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &surface, NULL);
+        ok(SUCCEEDED(hr), "Failed to create %s surface, hr %#x.\n", test_data[i].name, hr);
+
+        hr = IDirectDrawSurface7_SetPalette(surface, palette);
+        if (test_data[i].attach_allowed)
+            ok(SUCCEEDED(hr), "Failed to attach palette to %s surface, hr %#x.\n", test_data[i].name, hr);
+        else
+            ok(hr == DDERR_INVALIDSURFACETYPE, "Got unexpected hr %#x, %s surface.\n", hr, test_data[i].name);
+
+        if (SUCCEEDED(hr))
+        {
+            HDC dc;
+            RGBQUAD rgbquad;
+            UINT retval;
+
+            hr = IDirectDrawSurface7_GetDC(surface, &dc);
+            ok(SUCCEEDED(hr), "Failed to get DC, hr %#x, %s surface.\n", hr, test_data[i].name);
+            retval = GetDIBColorTable(dc, 1, 1, &rgbquad);
+            ok(retval == 1, "GetDIBColorTable returned unexpected result %u.\n", retval);
+            ok(rgbquad.rgbRed == 0xff, "Expected rgbRed = 0xff, got %#x, %s surface.\n",
+                    rgbquad.rgbRed, test_data[i].name);
+            ok(rgbquad.rgbGreen == 0, "Expected rgbGreen = 0, got %#x, %s surface.\n",
+                    rgbquad.rgbGreen, test_data[i].name);
+            ok(rgbquad.rgbBlue == 0, "Expected rgbBlue = 0, got %#x, %s surface.\n",
+                    rgbquad.rgbBlue, test_data[i].name);
+            todo_wine ok(rgbquad.rgbReserved == 0, "Expected rgbReserved = 0, got %u, %s surface.\n",
+                    rgbquad.rgbReserved, test_data[i].name);
+            hr = IDirectDrawSurface7_ReleaseDC(surface, dc);
+            ok(SUCCEEDED(hr), "Failed to release DC, hr %#x.\n", hr);
+        }
+        IDirectDrawSurface7_Release(surface);
+    }
+
+    /* Test INVALIDSURFACETYPE vs INVALIDPIXELFORMAT. */
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+    surface_desc.dwWidth = 128;
+    surface_desc.dwHeight = 128;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+    U4(surface_desc).ddpfPixelFormat.dwSize = sizeof(U4(surface_desc).ddpfPixelFormat);
+    U4(surface_desc).ddpfPixelFormat.dwFlags = DDPF_RGB;
+    U1(U4(surface_desc).ddpfPixelFormat).dwRGBBitCount = 32;
+    U2(U4(surface_desc).ddpfPixelFormat).dwRBitMask = 0x00ff0000;
+    U3(U4(surface_desc).ddpfPixelFormat).dwGBitMask = 0x0000ff00;
+    U4(U4(surface_desc).ddpfPixelFormat).dwBBitMask = 0x000000ff;
+    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &surface, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_SetPalette(surface, palette);
+    ok(hr == DDERR_INVALIDSURFACETYPE, "Got unexpected hr %#x.\n", hr);
+    IDirectDrawSurface7_Release(surface);
+
+    /* The Windows 8 testbot keeps extra references to the primary
+     * while in 8 bpp mode. */
+    hr = IDirectDraw7_RestoreDisplayMode(ddraw);
+    ok(SUCCEEDED(hr), "Failed to restore display mode, hr %#x.\n", hr);
+
+    refcount = IDirectDrawPalette_Release(palette);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+    refcount = IDirectDraw7_Release(ddraw);
+    ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+    DestroyWindow(window);
+}
+
 START_TEST(ddraw7)
 {
     HMODULE module = GetModuleHandleA("ddraw.dll");
@@ -6479,4 +7224,9 @@ START_TEST(ddraw7)
     test_pixel_format();
     test_create_surface_pitch();
     test_mipmap_lock();
+    test_palette_complex();
+    test_p8_rgb_blit();
+    test_material();
+    test_palette_gdi();
+    test_palette_alpha();
 }

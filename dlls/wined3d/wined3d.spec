@@ -1,6 +1,7 @@
 @ stdcall wined3d_mutex_lock()
 @ stdcall wined3d_mutex_unlock()
 
+@ cdecl wined3d_calculate_format_pitch(ptr long long long)
 @ cdecl wined3d_check_depth_stencil_match(ptr long long long long long)
 @ cdecl wined3d_check_device_format(ptr long long long long long long)
 @ cdecl wined3d_check_device_format_conversion(ptr long long long long)
@@ -206,7 +207,6 @@
 @ cdecl wined3d_surface_get_blt_status(ptr long)
 @ cdecl wined3d_surface_get_flip_status(ptr long)
 @ cdecl wined3d_surface_get_overlay_position(ptr ptr ptr)
-@ cdecl wined3d_surface_get_palette(ptr)
 @ cdecl wined3d_surface_get_parent(ptr)
 @ cdecl wined3d_surface_get_pitch(ptr)
 @ cdecl wined3d_surface_get_priority(ptr)

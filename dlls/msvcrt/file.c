@@ -88,6 +88,17 @@ typedef struct {
     char                lookahead[3];
     int                 exflag;
     CRITICAL_SECTION    crit;
+#if _MSVCR_VER >= 80
+    char textmode : 7;
+    char unicode : 1;
+    char pipech2[2];
+    __int64 startpos;
+    BOOL utf8translations;
+#endif
+#if _MSVCR_VER >= 90
+    char dbcsBuffer;
+    BOOL dbcsBufferUsed;
+#endif
 } ioinfo;
 
 /*********************************************************************
@@ -4040,7 +4051,7 @@ MSVCRT_FILE* CDECL MSVCRT__wfreopen(const MSVCRT_wchar_t *path, const MSVCRT_wch
 {
     int open_flags, stream_flags, fd;
 
-    TRACE(":path (%s) mode (%s) file (%p) fd (%d)\n", debugstr_w(path), debugstr_w(mode), file, file->_file);
+    TRACE(":path (%s) mode (%s) file (%p) fd (%d)\n", debugstr_w(path), debugstr_w(mode), file, file ? file->_file : -1);
 
     LOCK_FILES();
     if (!file || ((fd = file->_file) < 0) || fd > MSVCRT_fdend)

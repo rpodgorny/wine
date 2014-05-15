@@ -499,7 +499,6 @@ static HRESULT surface_create_dib_section(struct wined3d_surface *surface)
     surface->hDC = CreateCompatibleDC(0);
     SelectObject(surface->hDC, surface->dib.DIBsection);
     TRACE("Using wined3d palette %p.\n", surface->palette);
-    SelectPalette(surface->hDC, surface->palette ? surface->palette->hpal : 0, FALSE);
 
     surface->flags |= SFLAG_DIBSECTION;
 
@@ -671,8 +670,6 @@ static HRESULT surface_private_setup(struct wined3d_surface *surface)
 
     TRACE("surface %p.\n", surface);
 
-    surface->texture_target = GL_TEXTURE_2D;
-
     /* Non-power2 support */
     if (gl_info->supported[ARB_TEXTURE_NON_POWER_OF_TWO] || gl_info->supported[WINED3D_GL_NORMALIZED_TEXRECT]
             || gl_info->supported[ARB_TEXTURE_RECTANGLE])
@@ -788,23 +785,6 @@ static void surface_realize_palette(struct wined3d_surface *surface)
             }
             surface_invalidate_location(surface, ~surface->map_binding);
         }
-    }
-
-    if (surface->flags & SFLAG_DIBSECTION)
-    {
-        RGBQUAD col[256];
-        unsigned int i;
-
-        TRACE("Updating the DC's palette.\n");
-
-        for (i = 0; i < 256; ++i)
-        {
-            col[i].rgbRed   = palette->palents[i].peRed;
-            col[i].rgbGreen = palette->palents[i].peGreen;
-            col[i].rgbBlue  = palette->palents[i].peBlue;
-            col[i].rgbReserved = 0;
-        }
-        SetDIBColorTable(surface->hDC, 0, 256, col);
     }
 
     /* Propagate the changes to the drawable when we have a palette. */
@@ -1118,16 +1098,15 @@ static BOOL surface_convert_color_to_float(const struct wined3d_surface *surface
         DWORD color, struct wined3d_color *float_color)
 {
     const struct wined3d_format *format = surface->resource.format;
-    const struct wined3d_device *device = surface->resource.device;
 
     switch (format->id)
     {
         case WINED3DFMT_P8_UINT:
             if (surface->palette)
             {
-                float_color->r = surface->palette->palents[color].peRed / 255.0f;
-                float_color->g = surface->palette->palents[color].peGreen / 255.0f;
-                float_color->b = surface->palette->palents[color].peBlue / 255.0f;
+                float_color->r = surface->palette->colors[color].rgbRed / 255.0f;
+                float_color->g = surface->palette->colors[color].rgbGreen / 255.0f;
+                float_color->b = surface->palette->colors[color].rgbBlue / 255.0f;
             }
             else
             {
@@ -1135,7 +1114,7 @@ static BOOL surface_convert_color_to_float(const struct wined3d_surface *surface
                 float_color->g = 0.0f;
                 float_color->b = 0.0f;
             }
-            float_color->a = swapchain_is_p8(device->swapchains[0]) ? color / 255.0f : 1.0f;
+            float_color->a = color / 255.0f;
             break;
 
         case WINED3DFMT_B5G6R5_UNORM:
@@ -1394,28 +1373,14 @@ static void gdi_surface_realize_palette(struct wined3d_surface *surface)
 
     if (!palette) return;
 
-    if (surface->flags & SFLAG_DIBSECTION)
-    {
-        RGBQUAD col[256];
-        unsigned int i;
-
-        TRACE("Updating the DC's palette.\n");
-
-        for (i = 0; i < 256; ++i)
-        {
-            col[i].rgbRed = palette->palents[i].peRed;
-            col[i].rgbGreen = palette->palents[i].peGreen;
-            col[i].rgbBlue = palette->palents[i].peBlue;
-            col[i].rgbReserved = 0;
-        }
-        SetDIBColorTable(surface->hDC, 0, 256, col);
-    }
-
     /* Update the image because of the palette change. Some games like e.g.
      * Red Alert call SetEntries a lot to implement fading. */
     /* Tell the swapchain to update the screen. */
     if (surface->swapchain && surface == surface->swapchain->front_buffer)
+    {
+        SetDIBColorTable(surface->hDC, 0, 256, palette->colors);
         x11_copy_to_screen(surface->swapchain, NULL);
+    }
 }
 
 static void gdi_surface_unmap(struct wined3d_surface *surface)
@@ -1435,26 +1400,6 @@ static const struct wined3d_surface_ops gdi_surface_ops =
     gdi_surface_realize_palette,
     gdi_surface_unmap,
 };
-
-void surface_set_texture_target(struct wined3d_surface *surface, GLenum target, GLint level)
-{
-    TRACE("surface %p, target %#x.\n", surface, target);
-
-    if (surface->texture_target != target)
-    {
-        if (target == GL_TEXTURE_RECTANGLE_ARB)
-        {
-            surface->flags &= ~SFLAG_NORMCOORD;
-        }
-        else if (surface->texture_target == GL_TEXTURE_RECTANGLE_ARB)
-        {
-            surface->flags |= SFLAG_NORMCOORD;
-        }
-    }
-    surface->texture_target = target;
-    surface->texture_level = level;
-    surface_force_reload(surface);
-}
 
 /* This call just downloads data, the caller is responsible for binding the
  * correct texture. */
@@ -1502,13 +1447,6 @@ static void surface_download_data(struct wined3d_surface *surface, const struct 
         GLenum gl_type = format->glType;
         int src_pitch = 0;
         int dst_pitch = 0;
-
-        /* In case of P8 the index is stored in the alpha component if the primary render target uses P8. */
-        if (format->id == WINED3DFMT_P8_UINT && swapchain_is_p8(surface->resource.device->swapchains[0]))
-        {
-            gl_format = GL_ALPHA;
-            gl_type = GL_UNSIGNED_BYTE;
-        }
 
         if (surface->flags & SFLAG_NONPOW2)
         {
@@ -1772,10 +1710,7 @@ static HRESULT d3dfmt_get_conv(const struct wined3d_surface *surface, BOOL need_
                 format->glInternal = GL_RGBA;
                 format->glType = GL_UNSIGNED_BYTE;
                 format->conv_byte_count = 4;
-                if (colorkey_active)
-                    *conversion_type = WINED3D_CT_PALETTED_CK;
-                else
-                    *conversion_type = WINED3D_CT_PALETTED;
+                *conversion_type = WINED3D_CT_PALETTED;
             }
             break;
 
@@ -2426,16 +2361,9 @@ void CDECL wined3d_surface_set_palette(struct wined3d_surface *surface, struct w
         surface->surface_ops->surface_realize_palette(surface);
 }
 
-struct wined3d_palette * CDECL wined3d_surface_get_palette(const struct wined3d_surface *surface)
-{
-    TRACE("surface %p.\n", surface);
-
-    return surface->palette;
-}
-
 DWORD CDECL wined3d_surface_get_pitch(const struct wined3d_surface *surface)
 {
-    const struct wined3d_format *format = surface->resource.format;
+    unsigned int alignment;
     DWORD pitch;
 
     TRACE("surface %p.\n", surface);
@@ -2443,19 +2371,9 @@ DWORD CDECL wined3d_surface_get_pitch(const struct wined3d_surface *surface)
     if (surface->pitch)
         return surface->pitch;
 
-    if (format->flags & WINED3DFMT_FLAG_BLOCKS)
-    {
-        /* Since compressed formats are block based, pitch means the amount of
-         * bytes to the next row of block rather than the next row of pixels. */
-        UINT row_block_count = (surface->resource.width + format->block_width - 1) / format->block_width;
-        pitch = row_block_count * format->block_byte_count;
-    }
-    else
-    {
-        unsigned char alignment = surface->resource.device->surface_alignment;
-        pitch = surface->resource.format->byte_count * surface->resource.width;  /* Bytes / row */
-        pitch = (pitch + alignment - 1) & ~(alignment - 1);
-    }
+    alignment = surface->resource.device->surface_alignment;
+    pitch = wined3d_format_calculate_pitch(surface->resource.format, surface->resource.width);
+    pitch = (pitch + alignment - 1) & ~(alignment - 1);
 
     TRACE("Returning %u.\n", pitch);
 
@@ -3210,11 +3128,11 @@ HRESULT CDECL wined3d_surface_getdc(struct wined3d_surface *surface, HDC *dc)
         /* GetDC on palettized formats is unsupported in D3D9, and the method
          * is missing in D3D8, so this should only be used for DX <=7
          * surfaces (with non-device palettes). */
-        const PALETTEENTRY *pal = NULL;
+        const RGBQUAD *colors = NULL;
 
         if (surface->palette)
         {
-            pal = surface->palette->palents;
+            colors = surface->palette->colors;
         }
         else
         {
@@ -3222,23 +3140,11 @@ HRESULT CDECL wined3d_surface_getdc(struct wined3d_surface *surface, HDC *dc)
             struct wined3d_surface *dds_primary = swapchain->front_buffer;
 
             if (dds_primary && dds_primary->palette)
-                pal = dds_primary->palette->palents;
+                colors = dds_primary->palette->colors;
         }
 
-        if (pal)
-        {
-            RGBQUAD col[256];
-            unsigned int i;
-
-            for (i = 0; i < 256; ++i)
-            {
-                col[i].rgbRed = pal[i].peRed;
-                col[i].rgbGreen = pal[i].peGreen;
-                col[i].rgbBlue = pal[i].peBlue;
-                col[i].rgbReserved = 0;
-            }
-            SetDIBColorTable(surface->hDC, 0, 256, col);
-        }
+        if (colors)
+            SetDIBColorTable(surface->hDC, 0, 256, colors);
     }
 
     surface->flags |= SFLAG_DCINUSE;
@@ -3267,8 +3173,19 @@ HRESULT CDECL wined3d_surface_releasedc(struct wined3d_surface *surface, HDC dc)
     surface->resource.map_count--;
     surface->flags &= ~SFLAG_DCINUSE;
 
-    if (surface->map_binding == WINED3D_LOCATION_USER_MEMORY)
-        surface_load_location(surface, WINED3D_LOCATION_USER_MEMORY);
+    if (surface->map_binding == WINED3D_LOCATION_USER_MEMORY || (surface->flags & SFLAG_PIN_SYSMEM
+            && surface->map_binding != WINED3D_LOCATION_DIB))
+    {
+        /* The game Salammbo modifies the surface contents without mapping the surface between
+         * a GetDC/ReleaseDC operation and flipping the surface. If the DIB remains the active
+         * copy and is copied to the screen, this update, which draws the mouse pointer, is lost.
+         * Do not only copy the DIB to the map location, but also make sure the map location is
+         * copied back to the DIB in the next getdc call.
+         *
+         * The same consideration applies to user memory surfaces. */
+        surface_load_location(surface, surface->map_binding);
+        surface_invalidate_location(surface, WINED3D_LOCATION_DIB);
+    }
 
     return WINED3D_OK;
 }
@@ -3279,14 +3196,10 @@ static void read_from_framebuffer(struct wined3d_surface *surface, DWORD dst_loc
     const struct wined3d_gl_info *gl_info;
     struct wined3d_context *context;
     BYTE *mem;
-    GLint fmt;
-    GLint type;
     BYTE *row, *top, *bottom;
     int i;
-    BOOL bpp;
     BOOL srcIsUpsideDown;
     struct wined3d_bo_address data;
-    UINT pitch = wined3d_surface_get_pitch(surface);
 
     surface_get_memory(surface, &data, dst_location);
 
@@ -3316,56 +3229,10 @@ static void read_from_framebuffer(struct wined3d_surface *surface, DWORD dst_loc
         srcIsUpsideDown = FALSE;
     }
 
-    switch (surface->resource.format->id)
-    {
-        case WINED3DFMT_P8_UINT:
-        {
-            if (swapchain_is_p8(context->swapchain))
-            {
-                /* In case of P8 render targets the index is stored in the alpha component */
-                fmt = GL_ALPHA;
-                type = GL_UNSIGNED_BYTE;
-                mem = data.addr;
-                bpp = surface->resource.format->byte_count;
-            }
-            else
-            {
-                /* GL can't return palettized data, so read ARGB pixels into a
-                 * separate block of memory and convert them into palettized format
-                 * in software. Slow, but if the app means to use palettized render
-                 * targets and locks it...
-                 *
-                 * Use GL_RGB, GL_UNSIGNED_BYTE to read the surface for performance reasons
-                 * Don't use GL_BGR as in the WINED3DFMT_R8G8B8 case, instead watch out
-                 * for the color channels when palettizing the colors.
-                 */
-                fmt = GL_RGB;
-                type = GL_UNSIGNED_BYTE;
-                pitch *= 3;
-                mem = HeapAlloc(GetProcessHeap(), 0, surface->resource.size * 3);
-                if (!mem)
-                {
-                    ERR("Out of memory\n");
-                    return;
-                }
-                bpp = surface->resource.format->byte_count * 3;
-            }
-        }
-        break;
-
-        default:
-            mem = data.addr;
-            fmt = surface->resource.format->glFormat;
-            type = surface->resource.format->glType;
-            bpp = surface->resource.format->byte_count;
-    }
-
     if (data.buffer_object)
     {
         GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, data.buffer_object));
         checkGLcall("glBindBufferARB");
-        if (mem)
-            ERR("mem not null for pbo -- unexpected\n");
     }
 
     /* Setup pixel store pack state -- to glReadPixels into the correct place */
@@ -3374,109 +3241,55 @@ static void read_from_framebuffer(struct wined3d_surface *surface, DWORD dst_loc
 
     gl_info->gl_ops.gl.p_glReadPixels(0, 0,
             surface->resource.width, surface->resource.height,
-            fmt, type, mem);
+            surface->resource.format->glFormat,
+            surface->resource.format->glType, data.addr);
     checkGLcall("glReadPixels");
 
     /* Reset previous pixel store pack state */
     gl_info->gl_ops.gl.p_glPixelStorei(GL_PACK_ROW_LENGTH, 0);
     checkGLcall("glPixelStorei");
 
-    if (data.buffer_object && !srcIsUpsideDown)
-    {
-        /* Check if we need to flip the image. If we need to flip use glMapBufferARB
-         * to get a pointer to it and perform the flipping in software. This is a lot
-         * faster than calling glReadPixels for each line. In case we want more speed
-         * we should rerender it flipped in a FBO and read the data back from the FBO. */
-        mem = GL_EXTCALL(glMapBufferARB(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_WRITE_ARB));
-        checkGLcall("glMapBufferARB(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_WRITE_ARB)");
-    }
-
-    /* TODO: Merge this with the palettization loop below for P8 targets */
     if (!srcIsUpsideDown)
     {
-        UINT len;
         /* glReadPixels returns the image upside down, and there is no way to prevent this.
-            Flip the lines in software */
-        len = surface->resource.width * bpp;
+         * Flip the lines in software. */
+        UINT pitch = wined3d_surface_get_pitch(surface);
 
-        row = HeapAlloc(GetProcessHeap(), 0, len);
-        if (!row)
+        if (!(row = HeapAlloc(GetProcessHeap(), 0, pitch)))
+            goto error;
+
+        if (data.buffer_object)
         {
-            ERR("Out of memory\n");
-            if (surface->resource.format->id == WINED3DFMT_P8_UINT)
-                HeapFree(GetProcessHeap(), 0, mem);
-            return;
+            mem = GL_EXTCALL(glMapBufferARB(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_WRITE_ARB));
+            checkGLcall("glMapBufferARB(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_WRITE_ARB)");
         }
+        else
+            mem = data.addr;
 
         top = mem;
         bottom = mem + pitch * (surface->resource.height - 1);
         for (i = 0; i < surface->resource.height / 2; i++)
         {
-            memcpy(row, top, len);
-            memcpy(top, bottom, len);
-            memcpy(bottom, row, len);
+            memcpy(row, top, pitch);
+            memcpy(top, bottom, pitch);
+            memcpy(bottom, row, pitch);
             top += pitch;
             bottom -= pitch;
         }
         HeapFree(GetProcessHeap(), 0, row);
+
+        if (data.buffer_object)
+            GL_EXTCALL(glUnmapBufferARB(GL_PIXEL_PACK_BUFFER_ARB));
     }
 
+error:
     if (data.buffer_object)
     {
-        if (!srcIsUpsideDown)
-            GL_EXTCALL(glUnmapBufferARB(GL_PIXEL_PACK_BUFFER_ARB));
-
         GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, 0));
         checkGLcall("glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, 0)");
     }
 
     context_release(context);
-
-    /* For P8 textures we need to perform an inverse palette lookup. This is
-     * done by searching for a palette index which matches the RGB value.
-     * Note this isn't guaranteed to work when there are multiple entries for
-     * the same color but we have no choice. In case of P8 render targets,
-     * the index is stored in the alpha component so no conversion is needed. */
-    if (surface->resource.format->id == WINED3DFMT_P8_UINT && !swapchain_is_p8(context->swapchain))
-    {
-        const PALETTEENTRY *pal = NULL;
-        DWORD width = pitch / 3;
-        int x, y, c;
-
-        if (surface->palette)
-        {
-            pal = surface->palette->palents;
-        }
-        else
-        {
-            ERR("Palette is missing, cannot perform inverse palette lookup\n");
-            HeapFree(GetProcessHeap(), 0, mem);
-            return;
-        }
-
-        for (y = 0; y < surface->resource.height; y++)
-        {
-            for (x = 0; x < surface->resource.width; x++)
-            {
-                /*                      start              lines            pixels      */
-                const BYTE *blue = mem + y * pitch + x * (sizeof(BYTE) * 3);
-                const BYTE *green = blue  + 1;
-                const BYTE *red = green + 1;
-
-                for (c = 0; c < 256; c++)
-                {
-                    if (*red == pal[c].peRed
-                            && *green == pal[c].peGreen
-                            && *blue == pal[c].peBlue)
-                    {
-                        *((BYTE *)data.addr + y * width + x) = c;
-                        break;
-                    }
-                }
-            }
-        }
-        HeapFree(GetProcessHeap(), 0, mem);
-    }
 }
 
 /* Read the framebuffer contents into a texture. Note that this function
@@ -3582,54 +3395,33 @@ static BOOL color_in_range(const struct wined3d_color_key *color_key, DWORD colo
             && color <= color_key->color_space_high_value;
 }
 
-void d3dfmt_p8_init_palette(const struct wined3d_surface *surface, BYTE table[256][4], BOOL colorkey)
+void d3dfmt_p8_init_palette(const struct wined3d_surface *surface, BYTE table[256][4])
 {
-    const struct wined3d_device *device = surface->resource.device;
     const struct wined3d_palette *pal = surface->palette;
-    BOOL index_in_alpha = FALSE;
     unsigned int i;
-
-    /* Old games like StarCraft, C&C, Red Alert and others use P8 render targets.
-     * Reading back the RGB output each lockrect (each frame as they lock the whole screen)
-     * is slow. Further RGB->P8 conversion is not possible because palettes can have
-     * duplicate entries. Store the color key in the unused alpha component to speed the
-     * download up and to make conversion unneeded. */
-    index_in_alpha = swapchain_is_p8(device->swapchains[0]);
 
     if (!pal)
     {
         FIXME("No palette set.\n");
-        if (index_in_alpha)
-        {
-            /* Guarantees that memory representation remains correct after sysmem<->texture transfers even if
-             * there's no palette at this time. */
+        /* Guarantees that memory representation remains correct after sysmem<->texture transfers even if
+         * there's no palette at this time. */
             for (i = 0; i < 256; i++) table[i][3] = i;
-        }
     }
     else
     {
         TRACE("Using surface palette %p\n", pal);
-        /* Get the surface's palette */
         for (i = 0; i < 256; ++i)
         {
-            table[i][0] = pal->palents[i].peRed;
-            table[i][1] = pal->palents[i].peGreen;
-            table[i][2] = pal->palents[i].peBlue;
-
-            /* When index_in_alpha is set the palette index is stored in the
-             * alpha component. In case of a readback we can then read
-             * GL_ALPHA. Color keying is handled in surface_blt_special() using a
-             * GL_ALPHA_TEST using GL_NOT_EQUAL. In case of index_in_alpha the
-             * color key itself is passed to glAlphaFunc in other cases the
-             * alpha component of pixels that should be masked away is set to 0. */
-            if (index_in_alpha)
-                table[i][3] = i;
-            else if (colorkey && color_in_range(&surface->container->src_blt_color_key, i))
-                table[i][3] = 0x00;
-            else if (pal->flags & WINED3D_PALETTE_ALPHA)
-                table[i][3] = pal->palents[i].peFlags;
-            else
-                table[i][3] = 0xff;
+            table[i][0] = pal->colors[i].rgbRed;
+            table[i][1] = pal->colors[i].rgbGreen;
+            table[i][2] = pal->colors[i].rgbBlue;
+            /* The palette index is stored in the alpha component. In case of a
+             * readback we can then read GL_ALPHA. Color keying is handled in
+             * surface_blt_to_drawable() using a GL_ALPHA_TEST using GL_NOT_EQUAL.
+             * In case of a P8 surface the color key itself is passed to
+             * glAlphaFunc in other cases the alpha component of pixels that
+             * should be masked away is set to 0. */
+            table[i][3] = i;
         }
     }
 }
@@ -3652,12 +3444,11 @@ static HRESULT d3dfmt_convert_surface(const BYTE *src, BYTE *dst, UINT pitch, UI
         }
 
         case WINED3D_CT_PALETTED:
-        case WINED3D_CT_PALETTED_CK:
         {
             BYTE table[256][4];
             unsigned int x, y;
 
-            d3dfmt_p8_init_palette(surface, table, (conversion_type == WINED3D_CT_PALETTED_CK));
+            d3dfmt_p8_init_palette(surface, table);
 
             for (y = 0; y < height; y++)
             {
@@ -4319,11 +4110,10 @@ static void surface_blt_to_drawable(const struct wined3d_device *device,
         gl_info->gl_ops.gl.p_glEnable(GL_ALPHA_TEST);
         checkGLcall("glEnable(GL_ALPHA_TEST)");
 
-        /* When the primary render target uses P8, the alpha component
-         * contains the palette index. Which means that the colorkey is one of
-         * the palette entries. In other cases pixels that should be masked
-         * away have alpha set to 0. */
-        if (swapchain_is_p8(context->swapchain))
+        /* For P8 surfaces, the alpha component contains the palette index.
+         * Which means that the colorkey is one of the palette entries. In
+         * other cases pixels that should be masked away have alpha set to 0. */
+        if (src_surface->resource.format->id == WINED3DFMT_P8_UINT)
             gl_info->gl_ops.gl.p_glAlphaFunc(GL_NOTEQUAL,
                     (float)src_surface->container->src_blt_color_key.color_space_low_value / 256.0f);
         else
@@ -5428,6 +5218,7 @@ static HRESULT surface_cpu_blt_compressed(const BYTE *src_data, BYTE *dst_data,
                 }
                 return WINED3D_OK;
 
+            case WINED3DFMT_DXT2:
             case WINED3DFMT_DXT3:
                 for (y = 0; y < update_h; y += format->block_height)
                 {
@@ -6310,7 +6101,7 @@ cpu:
 }
 
 static HRESULT surface_init(struct wined3d_surface *surface, struct wined3d_texture *container,
-        const struct wined3d_resource_desc *desc, DWORD flags)
+        const struct wined3d_resource_desc *desc, GLenum target, GLint level, DWORD flags)
 {
     struct wined3d_device *device = container->resource.device;
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
@@ -6380,7 +6171,8 @@ static HRESULT surface_init(struct wined3d_surface *surface, struct wined3d_text
     list_init(&surface->overlays);
 
     /* Flags */
-    surface->flags |= SFLAG_NORMCOORD; /* Default to normalized coords. */
+    if (target != GL_TEXTURE_RECTANGLE_ARB)
+        surface->flags |= SFLAG_NORMCOORD;
     if (flags & WINED3D_SURFACE_DISCARD)
         surface->flags |= SFLAG_DISCARD;
     if (flags & WINED3D_SURFACE_PIN_SYSMEM)
@@ -6389,6 +6181,8 @@ static HRESULT surface_init(struct wined3d_surface *surface, struct wined3d_text
         surface->resource.access_flags |= WINED3D_RESOURCE_ACCESS_CPU;
 
     surface->map_binding = WINED3D_LOCATION_SYSMEM;
+    surface->texture_target = target;
+    surface->texture_level = level;
 
     /* Call the private setup routine */
     hr = surface->surface_ops->surface_private_setup(surface);
@@ -6417,8 +6211,8 @@ static HRESULT surface_init(struct wined3d_surface *surface, struct wined3d_text
     return hr;
 }
 
-HRESULT CDECL wined3d_surface_create(struct wined3d_texture *container,
-        const struct wined3d_resource_desc *desc, DWORD flags, struct wined3d_surface **surface)
+HRESULT wined3d_surface_create(struct wined3d_texture *container, const struct wined3d_resource_desc *desc,
+        GLenum target, GLint level, DWORD flags, struct wined3d_surface **surface)
 {
     struct wined3d_device_parent *device_parent = container->resource.device->device_parent;
     const struct wined3d_parent_ops *parent_ops;
@@ -6426,16 +6220,16 @@ HRESULT CDECL wined3d_surface_create(struct wined3d_texture *container,
     void *parent;
     HRESULT hr;
 
-    TRACE("container %p, width %u, height %u, format %s, usage %s (%#x), "
-            "pool %s, multisample_type %#x, multisample_quality %u, flags %#x, surface %p.\n",
+    TRACE("container %p, width %u, height %u, format %s, usage %s (%#x), pool %s, "
+            "multisample_type %#x, multisample_quality %u, target %#x, level %d, flags %#x, surface %p.\n",
             container, desc->width, desc->height, debug_d3dformat(desc->format),
             debug_d3dusage(desc->usage), desc->usage, debug_d3dpool(desc->pool),
-            desc->multisample_type, desc->multisample_quality, flags, surface);
+            desc->multisample_type, desc->multisample_quality, target, level, flags, surface);
 
     if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    if (FAILED(hr = surface_init(object, container, desc, flags)))
+    if (FAILED(hr = surface_init(object, container, desc, target, level, flags)))
     {
         WARN("Failed to initialize surface, returning %#x.\n", hr);
         HeapFree(GetProcessHeap(), 0, object);

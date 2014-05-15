@@ -628,7 +628,8 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
     - (BOOL) preventResizing
     {
-        return ([self styleMask] & NSResizableWindowMask) && (disabled || !resizable || maximized);
+        BOOL preventForClipping = cursor_clipping_locks_windows && [[WineApplicationController sharedController] clippingCursor];
+        return ([self styleMask] & NSResizableWindowMask) && (disabled || !resizable || maximized || preventForClipping);
     }
 
     - (void) adjustFeaturesForState
@@ -659,8 +660,15 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
             [self setContentMinSize:savedContentMinSize];
         }
 
-        if (allow_immovable_windows)
-            [self setMovable:!disabled && !maximized];
+        if (allow_immovable_windows || cursor_clipping_locks_windows)
+        {
+            if (allow_immovable_windows && (disabled || maximized))
+                [self setMovable:NO];
+            else if (cursor_clipping_locks_windows && [[WineApplicationController sharedController] clippingCursor])
+                [self setMovable:NO];
+            else
+                [self setMovable:YES];
+        }
     }
 
     - (void) adjustFullScreenBehavior:(NSWindowCollectionBehavior)behavior
@@ -1494,6 +1502,11 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         macdrv_release_event(event);
     }
 
+    - (void) updateForCursorClipping
+    {
+        [self adjustFeaturesForState];
+    }
+
 
     /*
      * ---------- NSWindow method overrides ----------
@@ -1809,7 +1822,17 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
     - (void)windowDidResize:(NSNotification *)notification
     {
         macdrv_event* event;
-        NSRect frame = [self contentRectForFrameRect:[self frame]];
+        NSRect frame = [self frame];
+
+        if ([self inLiveResize])
+        {
+            if (NSMinX(frame) != NSMinX(frameAtResizeStart))
+                resizingFromLeft = TRUE;
+            if (NSMaxY(frame) != NSMaxY(frameAtResizeStart))
+                resizingFromTop = TRUE;
+        }
+
+        frame = [self contentRectForFrameRect:frame];
 
         if (ignore_windowResize || exitingFullScreen) return;
 
@@ -1899,6 +1922,42 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         [self becameIneligibleParentOrChild];
     }
 
+    - (NSSize) windowWillResize:(NSWindow*)sender toSize:(NSSize)frameSize
+    {
+        if ([self inLiveResize])
+        {
+            NSRect rect;
+            macdrv_query* query;
+
+            rect = [self frame];
+            if (resizingFromLeft)
+                rect.origin.x = NSMaxX(rect) - frameSize.width;
+            if (!resizingFromTop)
+                rect.origin.y = NSMaxY(rect) - frameSize.height;
+            rect.size = frameSize;
+            rect = [self contentRectForFrameRect:rect];
+            [[WineApplicationController sharedController] flipRect:&rect];
+
+            query = macdrv_create_query();
+            query->type = QUERY_RESIZE_SIZE;
+            query->window = (macdrv_window)[self retain];
+            query->resize_size.rect = NSRectToCGRect(rect);
+            query->resize_size.from_left = resizingFromLeft;
+            query->resize_size.from_top = resizingFromTop;
+
+            if ([self.queue query:query timeout:0.1])
+            {
+                rect = NSRectFromCGRect(query->resize_size.rect);
+                rect = [self frameRectForContentRect:rect];
+                frameSize = rect.size;
+            }
+
+            macdrv_release_query(query);
+        }
+
+        return frameSize;
+    }
+
     - (void) windowWillStartLiveResize:(NSNotification *)notification
     {
         macdrv_query* query = macdrv_create_query();
@@ -1907,6 +1966,9 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
         [self.queue query:query timeout:0.3];
         macdrv_release_query(query);
+
+        frameAtResizeStart = [self frame];
+        resizingFromLeft = resizingFromTop = FALSE;
 
         // There's a strange restriction in window redrawing during Cocoa-
         // managed window resizing.  Only calls to -[NSView setNeedsDisplay...]

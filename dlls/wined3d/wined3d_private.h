@@ -1496,6 +1496,7 @@ enum wined3d_pci_device
     CARD_NVIDIA_GEFORCE_GTX770M     = 0x11e0,
     CARD_NVIDIA_GEFORCE_GTX770      = 0x1184,
     CARD_NVIDIA_GEFORCE_GTX780      = 0x1004,
+    CARD_NVIDIA_GEFORCE_GTX780TI    = 0x100a,
 
     CARD_VMWARE_SVGA3D              = 0x0405,
 
@@ -2299,8 +2300,8 @@ void surface_update_draw_binding(struct wined3d_surface *surface) DECLSPEC_HIDDE
 HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const POINT *dst_point,
         struct wined3d_surface *src_surface, const RECT *src_rect) DECLSPEC_HIDDEN;
 void surface_validate_location(struct wined3d_surface *surface, DWORD location) DECLSPEC_HIDDEN;
-HRESULT CDECL wined3d_surface_create(struct wined3d_texture *container,
-        const struct wined3d_resource_desc *desc, DWORD flags, struct wined3d_surface **surface) DECLSPEC_HIDDEN;
+HRESULT wined3d_surface_create(struct wined3d_texture *container, const struct wined3d_resource_desc *desc,
+        GLenum target, GLint level, DWORD flags, struct wined3d_surface **surface) DECLSPEC_HIDDEN;
 void surface_prepare_map_memory(struct wined3d_surface *surface) DECLSPEC_HIDDEN;
 
 void get_drawable_size_swapchain(const struct wined3d_context *context, UINT *width, UINT *height) DECLSPEC_HIDDEN;
@@ -2340,7 +2341,6 @@ enum wined3d_conversion_type
 {
     WINED3D_CT_NONE,
     WINED3D_CT_PALETTED,
-    WINED3D_CT_PALETTED_CK,
     WINED3D_CT_CK_565,
     WINED3D_CT_CK_5551,
     WINED3D_CT_CK_RGB24,
@@ -2348,7 +2348,7 @@ enum wined3d_conversion_type
     WINED3D_CT_CK_ARGB32,
 };
 
-void d3dfmt_p8_init_palette(const struct wined3d_surface *surface, BYTE table[256][4], BOOL colorkey) DECLSPEC_HIDDEN;
+void d3dfmt_p8_init_palette(const struct wined3d_surface *surface, BYTE table[256][4]) DECLSPEC_HIDDEN;
 
 struct wined3d_sampler
 {
@@ -2634,11 +2634,6 @@ struct wined3d_swapchain
     HDC backup_dc;
     HWND backup_wnd;
 };
-
-static inline BOOL swapchain_is_p8(const struct wined3d_swapchain *swapchain)
-{
-    return swapchain->desc.backbuffer_format == WINED3DFMT_P8_UINT;
-}
 
 void x11_copy_to_screen(const struct wined3d_swapchain *swapchain, const RECT *rect) DECLSPEC_HIDDEN;
 
@@ -2956,10 +2951,8 @@ struct wined3d_palette
     LONG ref;
     struct wined3d_device *device;
 
-    HPALETTE                   hpal;
-    WORD                       palVersion;     /*|               */
-    WORD                       palNumEntries;  /*|  LOGPALETTE   */
-    PALETTEENTRY               palents[256];   /*|               */
+    unsigned int size;
+    RGBQUAD colors[256];
     DWORD flags;
 };
 
@@ -3040,6 +3033,7 @@ struct wined3d_format
 
 const struct wined3d_format *wined3d_get_format(const struct wined3d_gl_info *gl_info,
         enum wined3d_format_id format_id) DECLSPEC_HIDDEN;
+UINT wined3d_format_calculate_pitch(const struct wined3d_format *format, UINT width) DECLSPEC_HIDDEN;
 UINT wined3d_format_calculate_size(const struct wined3d_format *format,
         UINT alignment, UINT width, UINT height, UINT depth) DECLSPEC_HIDDEN;
 DWORD wined3d_format_convert_from_float(const struct wined3d_surface *surface,

@@ -1741,6 +1741,8 @@ static IHTMLOptionElement *_create_option_elem(unsigned line, IHTMLDocument2 *do
     IHTMLWindow2_Release(window);
     ok_(__FILE__,line) (hres == S_OK, "get_Option failed: %08x\n", hres);
 
+    test_disp((IUnknown*)factory, &IID_IHTMLOptionElementFactory, "[object]");
+
     V_VT(&text) = VT_BSTR;
     V_BSTR(&text) = a2bstr(txt);
     V_VT(&value) = VT_BSTR;
@@ -2163,9 +2165,10 @@ static void _test_elem_collection(unsigned line, IUnknown *unk,
 
         fetched = 0;
         V_VT(&v) = VT_ERROR;
-        hres = IEnumVARIANT_Next(enum_var, 1, &v, &fetched);
+        hres = IEnumVARIANT_Next(enum_var, 1, &v, i ? &fetched : NULL);
         ok_(__FILE__,line)(hres == S_OK, "Next failed: %08x\n", hres);
-        ok_(__FILE__,line)(fetched == 1, "fetched = %d\n", fetched);
+        if(i)
+            ok_(__FILE__,line)(fetched == 1, "fetched = %d\n", fetched);
         ok_(__FILE__,line)(V_VT(&v) == VT_DISPATCH && V_DISPATCH(&v), "V_VT(v) = %d\n", V_VT(&v));
         ok_(__FILE__,line)(iface_cmp((IUnknown*)disp, (IUnknown*)V_DISPATCH(&v)), "disp != V_DISPATCH(v)\n");
         IDispatch_Release(V_DISPATCH(&v));
@@ -2182,6 +2185,13 @@ static void _test_elem_collection(unsigned line, IUnknown *unk,
 
     hres = IEnumVARIANT_Reset(enum_var);
     ok_(__FILE__,line)(hres == S_OK, "Reset failed: %08x\n", hres);
+
+    fetched = 0xdeadbeef;
+    V_VT(&v) = VT_BOOL;
+    hres = IEnumVARIANT_Next(enum_var, 0, &v, &fetched);
+    ok_(__FILE__,line)(hres == S_OK, "Next returned %08x, expected S_FALSE\n", hres);
+    ok_(__FILE__,line)(fetched == 0, "fetched = %d\n", fetched);
+    ok_(__FILE__,line)(V_VT(&v) == VT_BOOL, "V_VT(v) = %d\n", V_VT(&v));
 
     hres = IEnumVARIANT_Skip(enum_var, len > 2 ? len-2 : 0);
     ok_(__FILE__,line)(hres == S_OK, "Skip failed: %08x\n", hres);
@@ -2549,6 +2559,24 @@ static void _test_select_get_disabled(unsigned line, IHTMLSelectElement *select,
     ok_(__FILE__,line) (disabled == exb, "disabled=%x, expected %x\n", disabled, exb);
 
     _test_elem3_get_disabled(line, (IUnknown*)select, exb);
+}
+
+static void test_select_remove(IHTMLSelectElement *select)
+{
+    HRESULT hres;
+
+    hres = IHTMLSelectElement_remove(select, 3);
+    ok(hres == S_OK, "remove failed: %08x, expected S_OK\n", hres);
+    test_select_length(select, 2);
+
+    hres = IHTMLSelectElement_remove(select, -1);
+    todo_wine
+    ok(hres == E_INVALIDARG, "remove failed: %08x, expected E_INVALIDARG\n", hres);
+    test_select_length(select, 2);
+
+    hres = IHTMLSelectElement_remove(select, 0);
+    ok(hres == S_OK, "remove failed:%08x\n", hres);
+    test_select_length(select, 1);
 }
 
 #define test_text_length(u,l) _test_text_length(__LINE__,u,l)
@@ -3002,6 +3030,31 @@ static void _test_attr_specified(unsigned line, IHTMLDOMAttribute *attr, VARIANT
     hres = IHTMLDOMAttribute_get_specified(attr, &specified);
     ok_(__FILE__,line)(hres == S_OK, "get_specified failed: %08x\n", hres);
     ok_(__FILE__,line)(specified == expected, "specified = %x, expected %x\n", specified, expected);
+}
+
+static void test_contenteditable(IUnknown *unk)
+{
+    IHTMLElement3 *elem3 = get_elem3_iface(unk);
+    HRESULT hres;
+    BSTR str, strDefault;
+
+    hres = IHTMLElement3_get_contentEditable(elem3, &strDefault);
+    ok(hres == S_OK, "get_contentEditable failed: 0x%08x\n", hres);
+
+    str = a2bstr("true");
+    hres = IHTMLElement3_put_contentEditable(elem3, str);
+    ok(hres == S_OK, "put_contentEditable(%s) failed: 0x%08x\n", wine_dbgstr_w(str), hres);
+    SysFreeString(str);
+    hres = IHTMLElement3_get_contentEditable(elem3, &str);
+    ok(hres == S_OK, "get_contentEditable failed: 0x%08x\n", hres);
+    ok(!strcmp_wa(str, "true"), "Got %s, expected %s\n", wine_dbgstr_w(str), "true");
+
+    /* Restore origin contentEditable */
+    hres = IHTMLElement3_put_contentEditable(elem3, strDefault);
+    ok(hres == S_OK, "put_contentEditable(%s) failed: 0x%08x\n", wine_dbgstr_w(strDefault), hres);
+    SysFreeString(strDefault);
+
+    IHTMLElement3_Release(elem3);
 }
 
 #define test_input_type(i,t) _test_input_type(__LINE__,i,t)
@@ -4291,6 +4344,7 @@ static void test_select_elem(IHTMLSelectElement *select)
 
     test_select_multiple(select, VARIANT_FALSE);
     test_select_set_multiple(select, VARIANT_TRUE);
+    test_select_remove(select);
 }
 
 static void test_form_item(IHTMLElement *elem)
@@ -5883,6 +5937,54 @@ static void test_table_elem(IHTMLElement *elem)
     ok(hres == S_OK, "put_bgColor failed: %08x\n", hres);
     VariantClear(&vDefaultbg);
 
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = a2bstr("11");
+    hres = IHTMLTable_put_width(table, v);
+    ok(hres == S_OK, "put_width = %08x\n", hres);
+    VariantClear(&v);
+    IHTMLTable_get_width(table, &v);
+    ok(hres == S_OK, "get_width = %08x\n", hres);
+    ok(!strcmp_wa(V_BSTR(&v), "11"), "Expected 11, got %s\n", wine_dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = a2bstr("11.9");
+    hres = IHTMLTable_put_width(table, v);
+    ok(hres == S_OK, "put_width = %08x\n", hres);
+    VariantClear(&v);
+    IHTMLTable_get_width(table, &v);
+    ok(hres == S_OK, "get_width = %08x\n", hres);
+    ok(!strcmp_wa(V_BSTR(&v), "11"), "Expected 11, got %s\n", wine_dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = a2bstr("40.2%");
+    hres = IHTMLTable_put_width(table, v);
+    ok(hres == S_OK, "put_width = %08x\n", hres);
+    VariantClear(&v);
+    IHTMLTable_get_width(table, &v);
+    ok(hres == S_OK, "get_width = %08x\n", hres);
+    ok(!strcmp_wa(V_BSTR(&v), "40.2%"), "Expected 40.2%%, got %s\n", wine_dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = 11;
+    hres = IHTMLTable_put_width(table, v);
+    ok(hres == S_OK, "put_width = %08x\n", hres);
+    IHTMLTable_get_width(table, &v);
+    ok(hres == S_OK, "get_width = %08x\n", hres);
+    ok(!strcmp_wa(V_BSTR(&v), "11"), "Expected 11, got %s\n", wine_dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_R8;
+    V_R8(&v) = 11.9;
+    hres = IHTMLTable_put_width(table, v);
+    ok(hres == S_OK, "put_width = %08x\n", hres);
+    IHTMLTable_get_width(table, &v);
+    ok(hres == S_OK, "get_width = %08x\n", hres);
+    ok(!strcmp_wa(V_BSTR(&v), "11"), "Expected 11, got %s\n", wine_dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
+
     IHTMLTable_Release(table);
 }
 
@@ -6141,6 +6243,8 @@ static void test_stylesheet(IDispatch *disp)
     hres = IHTMLStyleSheet_get_rules(stylesheet, &col);
     ok(hres == S_OK, "get_rules failed: %08x\n", hres);
     ok(col != NULL, "col == NULL\n");
+
+    test_disp2((IUnknown*)col, &DIID_DispHTMLStyleSheetRulesCollection, &IID_IHTMLStyleSheetRulesCollection, "[object]");
     IHTMLStyleSheetRulesCollection_Release(col);
 
     href = (void*)0xdeadbeef;
@@ -6234,7 +6338,55 @@ static void test_child_col_disp(IHTMLDOMChildrenCollection *col)
     IDispatchEx_Release(dispex);
 }
 
+static void test_enum_children(IUnknown *unk, unsigned len)
+{
+    IEnumVARIANT *enum_var;
+    ULONG i, fetched;
+    VARIANT v;
+    HRESULT hres;
 
+    hres = IUnknown_QueryInterface(unk, &IID_IEnumVARIANT, (void**)&enum_var);
+    ok(hres == S_OK, "Could not get IEnumVARIANT iface: %08x\n", hres);
+
+    for(i=0; i<len; i++) {
+        fetched = 0;
+        V_VT(&v) = VT_ERROR;
+        hres = IEnumVARIANT_Next(enum_var, 1, &v, i ? &fetched : NULL);
+        ok(hres == S_OK, "Next failed: %08x\n", hres);
+        if(i)
+            ok(fetched == 1, "fetched = %d\n", fetched);
+        ok(V_VT(&v) == VT_DISPATCH && V_DISPATCH(&v), "V_VT(v) = %d\n", V_VT(&v));
+        IDispatch_Release(V_DISPATCH(&v));
+    }
+
+    fetched = 0xdeadbeef;
+    V_VT(&v) = VT_BOOL;
+    hres = IEnumVARIANT_Next(enum_var, 1, &v, &fetched);
+    ok(hres == S_FALSE, "Next returned %08x, expected S_FALSE\n", hres);
+    ok(fetched == 0, "fetched = %d\n", fetched);
+    ok(V_VT(&v) == VT_BOOL, "V_VT(v) = %d\n", V_VT(&v));
+
+    hres = IEnumVARIANT_Reset(enum_var);
+    ok(hres == S_OK, "Reset failed: %08x\n", hres);
+
+    fetched = 0xdeadbeef;
+    V_VT(&v) = VT_BOOL;
+    hres = IEnumVARIANT_Next(enum_var, 0, &v, &fetched);
+    ok(hres == S_OK, "Next returned %08x, expected S_FALSE\n", hres);
+    ok(fetched == 0, "fetched = %d\n", fetched);
+    ok(V_VT(&v) == VT_BOOL, "V_VT(v) = %d\n", V_VT(&v));
+
+    hres = IEnumVARIANT_Skip(enum_var, len > 2 ? len-2 : 0);
+    ok(hres == S_OK, "Skip failed: %08x\n", hres);
+
+    hres = IEnumVARIANT_Reset(enum_var);
+    ok(hres == S_OK, "Reset failed: %08x\n", hres);
+
+    hres = IEnumVARIANT_Skip(enum_var, len+1);
+    ok(hres == S_FALSE, "Skip failed: %08x\n", hres);
+
+    IEnumVARIANT_Release(enum_var);
+}
 
 static void test_elems(IHTMLDocument2 *doc)
 {
@@ -6556,6 +6708,7 @@ static void test_elems(IHTMLDocument2 *doc)
     if(elem) {
         test_dynamic_properties(elem);
         test_attr_collection(elem);
+        test_contenteditable((IUnknown*)elem);
         IHTMLElement_Release(elem);
     }
 
@@ -6694,6 +6847,7 @@ static void test_elems(IHTMLDocument2 *doc)
     child_col = get_child_nodes((IUnknown*)elem);
     ok(child_col != NULL, "child_coll == NULL\n");
     if(child_col) {
+        IUnknown *enum_unk;
         LONG length = 0;
 
         test_disp((IUnknown*)child_col, &DIID_DispDOMChildrenCollection, "[object]");
@@ -6744,6 +6898,13 @@ static void test_elems(IHTMLDocument2 *doc)
         ok(hres == E_INVALIDARG, "item failed: %08x, expected E_INVALIDARG\n", hres);
 
         test_child_col_disp(child_col);
+
+        hres = IHTMLDOMChildrenCollection_get__newEnum(child_col, &enum_unk);
+        ok(hres == S_OK, "get__newEnum failed: %08x\n", hres);
+
+        test_enum_children(enum_unk, length);
+
+        IUnknown_Release(enum_unk);
 
         IHTMLDOMChildrenCollection_Release(child_col);
     }

@@ -419,6 +419,9 @@ BOOL WINAPI GetMonitorInfoA(HMONITOR hMonitor, LPMONITORINFO lpMonitorInfo)
     MONITORINFOEXA *miA = (MONITORINFOEXA*)lpMonitorInfo;
     BOOL ret;
 
+    if((miA->cbSize != sizeof(MONITORINFOEXA)) && (miA->cbSize != sizeof(MONITORINFO)))
+        return FALSE;
+
     miW.cbSize = sizeof(miW);
 
     ret = GetMonitorInfoW(hMonitor, (MONITORINFO*)&miW);
@@ -427,7 +430,7 @@ BOOL WINAPI GetMonitorInfoA(HMONITOR hMonitor, LPMONITORINFO lpMonitorInfo)
     miA->rcMonitor = miW.rcMonitor;
     miA->rcWork = miW.rcWork;
     miA->dwFlags = miW.dwFlags;
-    if(miA->cbSize >= offsetof(MONITORINFOEXA, szDevice) + sizeof(miA->szDevice))
+    if(miA->cbSize == sizeof(MONITORINFOEXA))
         WideCharToMultiByte(CP_ACP, 0, miW.szDevice, -1, miA->szDevice, sizeof(miA->szDevice), NULL, NULL);
     return ret;
 }
@@ -437,7 +440,12 @@ BOOL WINAPI GetMonitorInfoA(HMONITOR hMonitor, LPMONITORINFO lpMonitorInfo)
  */
 BOOL WINAPI GetMonitorInfoW(HMONITOR hMonitor, LPMONITORINFO lpMonitorInfo)
 {
-    BOOL ret = USER_Driver->pGetMonitorInfo( hMonitor, lpMonitorInfo );
+    BOOL ret;
+
+    if (lpMonitorInfo->cbSize != sizeof(MONITORINFOEXW) && lpMonitorInfo->cbSize != sizeof(MONITORINFO))
+        return FALSE;
+
+    ret = USER_Driver->pGetMonitorInfo( hMonitor, lpMonitorInfo );
     if (ret)
         TRACE("flags %04x, monitor %s, work %s\n", lpMonitorInfo->dwFlags,
               wine_dbgstr_rect(&lpMonitorInfo->rcMonitor),

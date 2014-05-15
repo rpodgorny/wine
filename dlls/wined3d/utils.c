@@ -740,10 +740,10 @@ static const struct wined3d_format_texture_info format_texture_info[] =
             | WINED3DFMT_FLAG_VTF,
             ARB_TEXTURE_FLOAT,          NULL},
     /* Palettized formats */
-    {WINED3DFMT_P8_UINT,                GL_RGBA,                          GL_RGBA,                                0,
+    {WINED3DFMT_P8_UINT,                GL_ALPHA8,                        GL_ALPHA8,                              0,
             GL_ALPHA,                   GL_UNSIGNED_BYTE,                 0,
             0,
-            ARB_FRAGMENT_PROGRAM,       NULL},
+            0,                          NULL},
     /* Standard ARGB formats */
     {WINED3DFMT_B8G8R8_UNORM,           GL_RGB8,                          GL_RGB8,                                0,
             GL_BGR,                     GL_UNSIGNED_BYTE,                 0,
@@ -2019,9 +2019,20 @@ const struct wined3d_format *wined3d_get_format(const struct wined3d_gl_info *gl
     return &gl_info->formats[idx];
 }
 
+UINT wined3d_format_calculate_pitch(const struct wined3d_format *format, UINT width)
+{
+    /* For block based formats, pitch means the amount of bytes to the next
+     * row of blocks rather than the next row of pixels. */
+    if (format->flags & WINED3DFMT_FLAG_BLOCKS)
+        return format->block_byte_count * ((width + format->block_width - 1) / format->block_width);
+
+    return format->byte_count * width;
+}
+
 UINT wined3d_format_calculate_size(const struct wined3d_format *format, UINT alignment,
         UINT width, UINT height, UINT depth)
 {
+    UINT pitch = wined3d_format_calculate_pitch(format, width);
     UINT size;
 
     if (format->id == WINED3DFMT_UNKNOWN)
@@ -2030,13 +2041,12 @@ UINT wined3d_format_calculate_size(const struct wined3d_format *format, UINT ali
     }
     else if (format->flags & WINED3DFMT_FLAG_BLOCKS)
     {
-        UINT row_block_count = (width + format->block_width - 1) / format->block_width;
         UINT row_count = (height + format->block_height - 1) / format->block_height;
-        size = row_count * (((row_block_count * format->block_byte_count) + alignment - 1) & ~(alignment - 1));
+        size = row_count * ((pitch + alignment - 1) & ~(alignment - 1));
     }
     else
     {
-        size = height * (((width * format->byte_count) + alignment - 1) & ~(alignment - 1));
+        size = height * ((pitch + alignment - 1) & ~(alignment - 1));
     }
 
     if (format->flags & WINED3DFMT_FLAG_HEIGHT_SCALE)
@@ -3054,6 +3064,7 @@ DWORD wined3d_format_convert_from_float(const struct wined3d_surface *surface, c
         {WINED3DFMT_R8G8B8X8_UNORM,     255.0f,  255.0f,  255.0f,  255.0f,  0,  8, 16, 24},
         {WINED3DFMT_B10G10R10A2_UNORM, 1023.0f, 1023.0f, 1023.0f,    3.0f, 20, 10,  0, 30},
         {WINED3DFMT_R10G10B10A2_UNORM, 1023.0f, 1023.0f, 1023.0f,    3.0f,  0, 10, 20, 30},
+        {WINED3DFMT_P8_UINT,              0.0f,    0.0f,    0.0f,  255.0f,  0,  0,  0,  0},
     };
     const struct wined3d_format *format = surface->resource.format;
     unsigned int i;
@@ -3075,40 +3086,6 @@ DWORD wined3d_format_convert_from_float(const struct wined3d_surface *surface, c
         TRACE("Returning 0x%08x.\n", ret);
 
         return ret;
-    }
-
-    if (format->id == WINED3DFMT_P8_UINT)
-    {
-        PALETTEENTRY *e;
-        BYTE r, g, b, a;
-
-        if (!surface->palette)
-        {
-            WARN("Surface doesn't have a palette, returning 0.\n");
-            return 0;
-        }
-
-        r = (BYTE)((color->r * 255.0f) + 0.5f);
-        g = (BYTE)((color->g * 255.0f) + 0.5f);
-        b = (BYTE)((color->b * 255.0f) + 0.5f);
-        a = (BYTE)((color->a * 255.0f) + 0.5f);
-
-        e = &surface->palette->palents[a];
-        if (e->peRed == r && e->peGreen == g && e->peBlue == b)
-            return a;
-
-        WARN("Alpha didn't match index, searching full palette.\n");
-
-        for (i = 0; i < 256; ++i)
-        {
-            e = &surface->palette->palents[i];
-            if (e->peRed == r && e->peGreen == g && e->peBlue == b)
-                return i;
-        }
-
-        FIXME("Unable to convert color to palette index.\n");
-
-        return 0;
     }
 
     FIXME("Conversion for format %s not implemented.\n", debug_d3dformat(format->id));

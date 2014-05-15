@@ -21,3 +21,47 @@ typedef struct D2D_POINT_2F
     FLOAT x;
     FLOAT y;
 } D2D_POINT_2F;
+
+typedef struct D2D_MATRIX_3X2_F
+{
+    float _11;
+    float _12;
+    float _21;
+    float _22;
+    float _31;
+    float _32;
+} D2D_MATRIX_3X2_F;
+
+typedef struct D2D_RECT_F
+{
+    float left;
+    float top;
+    float right;
+    float bottom;
+} D2D_RECT_F;
+
+typedef struct D2D_SIZE_F
+{
+    float width;
+    float height;
+} D2D_SIZE_F;
+
+typedef struct D2D_SIZE_U
+{
+    UINT32 width;
+    UINT32 height;
+} D2D_SIZE_U;
+
+typedef struct D2D_POINT_2U
+{
+    UINT32 x;
+    UINT32 y;
+} D2D_POINT_2U;
+
+typedef struct D2D_RECT_U
+{
+    UINT32 left;
+    UINT32 top;
+    UINT32 right;
+    UINT32 bottom;
+} D2D_RECT_U;

@@ -838,7 +838,7 @@ static void test_dibsections(void)
     }
     pbmi->bmiHeader.biClrUsed = 173;
     memset( pbmi->bmiColors, 0xcc, 256 * sizeof(RGBQUAD) );
-    GetDIBits( hdc, hdib, 0, 1, bits, pbmi, DIB_RGB_COLORS );
+    GetDIBits( hdc, hdib, 0, 1, NULL, pbmi, DIB_RGB_COLORS );
     ok( pbmi->bmiHeader.biClrUsed == 0, "wrong colors %u\n", pbmi->bmiHeader.biClrUsed );
     for (i = 0; i < 256; i++)
     {
@@ -853,6 +853,21 @@ static void test_dibsections(void)
                "GetDIBits returns table %d: r %02x g %02x b %02x res%02x\n",
                i, colors[i].rgbRed, colors[i].rgbGreen, colors[i].rgbBlue, colors[i].rgbReserved);
     }
+
+    rgb[0].rgbRed = 1;
+    rgb[0].rgbGreen = 2;
+    rgb[0].rgbBlue = 3;
+    rgb[0].rgbReserved = 123;
+    ret = SetDIBColorTable( hdcmem, 0, 1, rgb );
+    ok( ret == 1, "SetDIBColorTable returned unexpected result %u\n", ret );
+    ok( rgb[0].rgbReserved == 123, "Expected rgbReserved = 123, got %u\n", rgb[0].rgbReserved );
+
+    ret = GetDIBColorTable( hdcmem, 0, 1, rgb );
+    ok( ret == 1, "GetDIBColorTable returned unexpected result %u\n", ret );
+    ok( rgb[0].rgbRed == 1, "Expected rgbRed = 1, got %u\n", rgb[0].rgbRed );
+    ok( rgb[0].rgbGreen == 2, "Expected rgbGreen = 2, got %u\n", rgb[0].rgbGreen );
+    ok( rgb[0].rgbBlue == 3, "Expected rgbBlue = 3, got %u\n", rgb[0].rgbBlue );
+    todo_wine ok( rgb[0].rgbReserved == 0, "Expected rgbReserved = 0, got %u\n", rgb[0].rgbReserved );
 
     SelectObject(hdcmem, oldbm);
     DeleteObject(hdib);

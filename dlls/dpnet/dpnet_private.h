@@ -46,9 +46,15 @@ typedef struct IDirectPlay8ThreadPoolImpl IDirectPlay8ThreadPoolImpl;
  */
 struct IDirectPlay8ClientImpl
 {
-  IDirectPlay8Client IDirectPlay8Client_iface;
-  LONG ref;
-  /* IDirectPlay8Client fields */
+    IDirectPlay8Client IDirectPlay8Client_iface;
+    LONG ref;
+
+    /* IDirectPlay8Client fields */
+    PFNDPNMESSAGEHANDLER msghandler;
+    DWORD flags;
+    void *usercontext;
+
+    DPN_SP_CAPS spcaps;
 };
 
 /* ------------------- */
@@ -64,7 +70,7 @@ struct IDirectPlay8AddressImpl
   LONG ref;
   /* IDirectPlay8Address fields */
   GUID SP_guid;
-  const WCHAR *url;
+  BOOL init;
 };
 
 /*****************************************************************************
@@ -72,8 +78,13 @@ struct IDirectPlay8AddressImpl
  */
 struct IDirectPlay8LobbiedApplicationImpl
 {
-  IDirectPlay8LobbiedApplication IDirectPlay8LobbiedApplication_iface;
-  LONG ref;
+    IDirectPlay8LobbiedApplication IDirectPlay8LobbiedApplication_iface;
+    LONG ref;
+
+    PFNDPNMESSAGEHANDLER msghandler;
+    DWORD flags;
+    void *usercontext;
+    DPNHANDLE *connection;
 };
 
 /*****************************************************************************
@@ -94,6 +105,8 @@ extern HRESULT DPNET_CreateDirectPlay8Peer(LPCLASSFACTORY iface, LPUNKNOWN punkO
 extern HRESULT DPNET_CreateDirectPlay8Address(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj) DECLSPEC_HIDDEN;
 extern HRESULT DPNET_CreateDirectPlay8LobbiedApp(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj) DECLSPEC_HIDDEN;
 extern HRESULT DPNET_CreateDirectPlay8ThreadPool(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj) DECLSPEC_HIDDEN;
+
+extern void init_dpn_sp_caps(DPN_SP_CAPS *dpnspcaps) DECLSPEC_HIDDEN;
 
 /* used for generic dumping (copied from ddraw) */
 typedef struct {

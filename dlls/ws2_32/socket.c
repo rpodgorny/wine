@@ -2559,7 +2559,7 @@ static BOOL interface_bind( SOCKET s, int fd, struct sockaddr *addr )
     DWORD adap_size;
     int enable = 1;
 
-    if (bind_addr == htonl(WS_INADDR_ANY) || bind_addr == htonl(WS_INADDR_LOOPBACK))
+    if (bind_addr == htonl(INADDR_ANY) || bind_addr == htonl(INADDR_LOOPBACK))
         return FALSE; /* Not binding to a network adapter, special interface binding unnecessary. */
     if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &sock_type, &optlen) == -1 || sock_type != SOCK_DGRAM)
         return FALSE; /* Special interface binding is only necessary for UDP datagrams. */
@@ -2664,10 +2664,10 @@ int WINAPI WS_bind(SOCKET s, const struct WS_sockaddr* name, int namelen)
                          * INADDR_ANY instead*/
                         WARN("Trying to bind to magic IP address, using "
                              "INADDR_ANY instead.\n");
-                        in4->sin_addr.s_addr = htonl(WS_INADDR_ANY);
+                        in4->sin_addr.s_addr = htonl(INADDR_ANY);
                     }
                     else if (interface_bind(s, fd, &uaddr.addr))
-                        in4->sin_addr.s_addr = htonl(WS_INADDR_ANY);
+                        in4->sin_addr.s_addr = htonl(INADDR_ANY);
                 }
                 if (bind(fd, &uaddr.addr, uaddrlen) < 0)
                 {
@@ -2682,6 +2682,20 @@ int WINAPI WS_bind(SOCKET s, const struct WS_sockaddr* name, int namelen)
                     case EADDRNOTAVAIL:
                         SetLastError(WSAEINVAL);
                         break;
+                    case EADDRINUSE:
+                    {
+                        int optval = 0;
+                        socklen_t optlen = sizeof(optval);
+                        /* Windows >= 2003 will return different results depending on
+                         * SO_REUSEADDR, WSAEACCES may be returned representing that
+                         * the socket hijacking protection prevented the bind */
+                        if (!getsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *)&optval, &optlen) && optval)
+                        {
+                            SetLastError(WSAEACCES);
+                            break;
+                        }
+                        /* fall through */
+                    }
                     default:
                         SetLastError(wsaErrno());
                         break;
@@ -2725,7 +2739,7 @@ static int do_connect(int fd, const struct WS_sockaddr* name, int namelen)
                 * assuming we really want to connect to localhost */
             TRACE("Trying to connect to magic IP address, using "
                     "INADDR_LOOPBACK instead.\n");
-            in4->sin_addr.s_addr = htonl(WS_INADDR_LOOPBACK);
+            in4->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         }
     }
 
@@ -5013,13 +5027,13 @@ int WINAPI WS_shutdown(SOCKET s, int how)
 
     switch( how )
     {
-    case 0: /* drop receives */
+    case SD_RECEIVE: /* drop receives */
         clear_flags |= FD_READ;
         break;
-    case 1: /* drop sends */
+    case SD_SEND: /* drop sends */
         clear_flags |= FD_WRITE;
         break;
-    case 2: /* drop all */
+    case SD_BOTH: /* drop all */
         clear_flags |= FD_READ|FD_WRITE;
         /*fall through */
     default:
@@ -7361,7 +7375,7 @@ INT WINAPI WSARecvDisconnect( SOCKET s, LPWSABUF disconnectdata )
 {
     TRACE( "(0x%04lx %p)\n", s, disconnectdata );
 
-    return WS_shutdown( s, 0 );
+    return WS_shutdown( s, SD_RECEIVE );
 }
 
 /***********************************************************************

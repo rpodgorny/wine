@@ -152,10 +152,24 @@ struct nvertex
     DWORD diffuse;
 };
 
-static void test_sanity(IDirect3DDevice8 *device)
+static void test_sanity(void)
 {
+    IDirect3DDevice8 *device;
+    IDirect3D8 *d3d;
     D3DCOLOR color;
+    ULONG refcount;
+    HWND window;
     HRESULT hr;
+
+    window = CreateWindowA("static", "d3d8_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    d3d = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+    if (!(device = create_device(d3d, window, window, TRUE)))
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
 
     hr = IDirect3DDevice8_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff0000, 1.0f, 0);
     ok(SUCCEEDED(hr), "Failed to clear, hr %#x.\n", hr);
@@ -172,6 +186,12 @@ static void test_sanity(IDirect3DDevice8 *device)
 
     hr = IDirect3DDevice8_Present(device, NULL, NULL, NULL, NULL);
     ok(SUCCEEDED(hr), "Failed to present, hr %#x.\n", hr);
+
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+done:
+    IDirect3D8_Release(d3d);
+    DestroyWindow(window);
 }
 
 static void lighting_test(void)
@@ -1443,7 +1463,9 @@ static void cnd_test(void)
     hr = IDirect3DDevice8_Present(device, NULL, NULL, NULL, NULL);
     ok(hr == D3D_OK, "IDirect3DDevice8_Present failed with %08x\n", hr);
 
-    /* Retest with the coissue flag on the alpha instruction instead. This works "as expected". */
+    /* Retest with the coissue flag on the alpha instruction instead. This
+     * works "as expected". The Windows 8 testbot (WARP) seems to handle this
+     * the same as coissue on .rgb. */
     hr = IDirect3DDevice8_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff00ffff, 0.0f, 0);
     ok(hr == D3D_OK, "IDirect3DDevice8_Clear returned %08x\n", hr);
 
@@ -1485,13 +1507,13 @@ static void cnd_test(void)
 
     /* 1.1 shader */
     color = getPixelColor(device, 238, 358);
-    ok(color_match(color, 0x00ffffff, 1),
+    ok(color_match(color, 0x00ffffff, 1) || broken(color_match(color, 0x00000000, 1)),
             "pixel 238, 358 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 242, 358);
     ok(color_match(color, 0x00000000, 1),
             "pixel 242, 358 has color %08x, expected 0x00000000\n", color);
     color = getPixelColor(device, 238, 362);
-    ok(color_match(color, 0x00ffffff, 1),
+    ok(color_match(color, 0x00ffffff, 1) || broken(color_match(color, 0x00000000, 1)),
             "pixel 238, 362 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 242, 362);
     ok(color_match(color, 0x00000000, 1),
@@ -1499,13 +1521,13 @@ static void cnd_test(void)
 
     /* 1.2 shader */
     color = getPixelColor(device, 558, 358);
-    ok(color_match(color, 0x00ffffff, 1),
+    ok(color_match(color, 0x00ffffff, 1) || broken(color_match(color, 0x00000000, 1)),
             "pixel 558, 358 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 562, 358);
     ok(color_match(color, 0x00000000, 1),
             "pixel 562, 358 has color %08x, expected 0x00000000\n", color);
     color = getPixelColor(device, 558, 362);
-    ok(color_match(color, 0x00ffffff, 1),
+    ok(color_match(color, 0x00ffffff, 1) || broken(color_match(color, 0x00000000, 1)),
             "pixel 558, 362 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 562, 362);
     ok(color_match(color, 0x00000000, 1),
@@ -1513,13 +1535,13 @@ static void cnd_test(void)
 
     /* 1.3 shader */
     color = getPixelColor(device, 558, 118);
-    ok(color_match(color, 0x00ffffff, 1),
+    ok(color_match(color, 0x00ffffff, 1) || broken(color_match(color, 0x00000000, 1)),
             "pixel 558, 118 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 562, 118);
     ok(color_match(color, 0x00000000, 1),
             "pixel 562, 118 has color %08x, expected 0x00000000\n", color);
     color = getPixelColor(device, 558, 122);
-    ok(color_match(color, 0x00ffffff, 1),
+    ok(color_match(color, 0x00ffffff, 1) || broken(color_match(color, 0x00000000, 1)),
             "pixel 558, 122 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 562, 122);
     ok(color_match(color, 0x00000000, 1),
@@ -2606,44 +2628,53 @@ done:
  *     clipped when D3DPMISCCAPS_CLIPTLVERTS is set, clamped when it isn't.
  *   - The viewport's MinZ/MaxZ is irrelevant for this.
  */
-static void depth_clamp_test(IDirect3DDevice8 *device)
+static void depth_clamp_test(void)
 {
-    const struct tvertex quad1[] =
+    IDirect3DDevice8 *device;
+    D3DVIEWPORT8 vp;
+    IDirect3D8 *d3d;
+    D3DCOLOR color;
+    ULONG refcount;
+    D3DCAPS8 caps;
+    HWND window;
+    HRESULT hr;
+
+    static const struct tvertex quad1[] =
     {
         {  0.0f,   0.0f,  5.0f, 1.0f, 0xff002b7f},
         {640.0f,   0.0f,  5.0f, 1.0f, 0xff002b7f},
         {  0.0f, 480.0f,  5.0f, 1.0f, 0xff002b7f},
         {640.0f, 480.0f,  5.0f, 1.0f, 0xff002b7f},
     };
-    const struct tvertex quad2[] =
+    static const struct tvertex quad2[] =
     {
         {  0.0f, 300.0f, 10.0f, 1.0f, 0xfff9e814},
         {640.0f, 300.0f, 10.0f, 1.0f, 0xfff9e814},
         {  0.0f, 360.0f, 10.0f, 1.0f, 0xfff9e814},
         {640.0f, 360.0f, 10.0f, 1.0f, 0xfff9e814},
     };
-    const struct tvertex quad3[] =
+    static const struct tvertex quad3[] =
     {
         {112.0f, 108.0f,  5.0f, 1.0f, 0xffffffff},
         {208.0f, 108.0f,  5.0f, 1.0f, 0xffffffff},
         {112.0f, 204.0f,  5.0f, 1.0f, 0xffffffff},
         {208.0f, 204.0f,  5.0f, 1.0f, 0xffffffff},
     };
-    const struct tvertex quad4[] =
+    static const struct tvertex quad4[] =
     {
         { 42.0f,  41.0f, 10.0f, 1.0f, 0xffffffff},
         {112.0f,  41.0f, 10.0f, 1.0f, 0xffffffff},
         { 42.0f, 108.0f, 10.0f, 1.0f, 0xffffffff},
         {112.0f, 108.0f, 10.0f, 1.0f, 0xffffffff},
     };
-    const struct vertex quad5[] =
+    static const struct vertex quad5[] =
     {
         { -0.5f,   0.5f, 10.0f,       0xff14f914},
         {  0.5f,   0.5f, 10.0f,       0xff14f914},
         { -0.5f,  -0.5f, 10.0f,       0xff14f914},
         {  0.5f,  -0.5f, 10.0f,       0xff14f914},
     };
-    const struct vertex quad6[] =
+    static const struct vertex quad6[] =
     {
         { -1.0f,   0.5f, 10.0f,       0xfff91414},
         {  1.0f,   0.5f, 10.0f,       0xfff91414},
@@ -2651,10 +2682,18 @@ static void depth_clamp_test(IDirect3DDevice8 *device)
         {  1.0f,  0.25f, 10.0f,       0xfff91414},
     };
 
-    D3DVIEWPORT8 vp;
-    D3DCOLOR color;
-    D3DCAPS8 caps;
-    HRESULT hr;
+    window = CreateWindowA("static", "d3d8_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    d3d = Direct3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+    if (!(device = create_device(d3d, window, window, TRUE)))
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
+
+    hr = IDirect3DDevice8_GetDeviceCaps(device, &caps);
+    ok(SUCCEEDED(hr), "Failed to get device caps, hr %#x.\n", hr);
 
     vp.X = 0;
     vp.Y = 0;
@@ -2662,9 +2701,6 @@ static void depth_clamp_test(IDirect3DDevice8 *device)
     vp.Height = 480;
     vp.MinZ = 0.0;
     vp.MaxZ = 7.5;
-
-    hr = IDirect3DDevice8_GetDeviceCaps(device, &caps);
-    ok(SUCCEEDED(hr), "Failed to get device caps, hr %#x.\n", hr);
 
     hr = IDirect3DDevice8_SetViewport(device, &vp);
     ok(SUCCEEDED(hr), "SetViewport failed, hr %#x.\n", hr);
@@ -2747,10 +2783,11 @@ static void depth_clamp_test(IDirect3DDevice8 *device)
     hr = IDirect3DDevice8_Present(device, NULL, NULL, NULL, NULL);
     ok(SUCCEEDED(hr), "Present failed (0x%08x)\n", hr);
 
-    vp.MinZ = 0.0;
-    vp.MaxZ = 1.0;
-    hr = IDirect3DDevice8_SetViewport(device, &vp);
-    ok(SUCCEEDED(hr), "SetViewport failed, hr %#x.\n", hr);
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+done:
+    IDirect3D8_Release(d3d);
+    DestroyWindow(window);
 }
 
 static void depth_buffer_test(void)
@@ -4087,6 +4124,15 @@ static void zenable_test(void)
             0x00ff0000, 0x00606060, 0x009f609f, 0x00ff0000,
             0x00ff0000, 0x00602060, 0x009f209f, 0x00ff0000,
         };
+        /* The Windows 8 testbot (WARP) appears to not clip z for regular
+         * vertices either. */
+        static const D3DCOLOR expected_broken[] =
+        {
+            0x0020df20, 0x0060df60, 0x009fdf9f, 0x00dfdfdf,
+            0x00209f20, 0x00609f60, 0x009f9f9f, 0x00df9fdf,
+            0x00206020, 0x00606060, 0x009f609f, 0x00df60df,
+            0x00202020, 0x00602060, 0x009f209f, 0x00df20df,
+        };
         static const DWORD decl[] =
         {
             D3DVSD_STREAM(0),
@@ -4120,7 +4166,8 @@ static void zenable_test(void)
                 x = 80 * ((2 * j) + 1);
                 y = 60 * ((2 * i) + 1);
                 color = getPixelColor(device, x, y);
-                ok(color_match(color, expected[i * 4 + j], 1),
+                ok(color_match(color, expected[i * 4 + j], 1)
+                        || broken(color_match(color, expected_broken[i * 4 + j], 1)),
                         "Expected color 0x%08x at %u, %u, got 0x%08x.\n", expected[i * 4 + j], x, y, color);
             }
         }
@@ -4982,10 +5029,7 @@ done:
 START_TEST(visual)
 {
     D3DADAPTER_IDENTIFIER8 identifier;
-    IDirect3DDevice8 *device_ptr;
     IDirect3D8 *d3d;
-    ULONG refcount;
-    HWND window;
     HRESULT hr;
 
     if (!(d3d = Direct3DCreate8(D3D_SDK_VERSION)))
@@ -5005,23 +5049,10 @@ START_TEST(visual)
             HIWORD(U(identifier.DriverVersion).HighPart), LOWORD(U(identifier.DriverVersion).HighPart),
             HIWORD(U(identifier.DriverVersion).LowPart), LOWORD(U(identifier.DriverVersion).LowPart));
 
-    window = CreateWindowA("static", "d3d8_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-            0, 0, 640, 480, NULL, NULL, NULL, NULL);
-    if (!(device_ptr = create_device(d3d, window, window, TRUE)))
-    {
-        skip("Failed to create a D3D device, skipping tests.\n");
-        goto cleanup;
-    }
-
-    test_sanity(device_ptr);
-    depth_clamp_test(device_ptr);
-
-    refcount = IDirect3DDevice8_Release(device_ptr);
-    ok(!refcount, "Device has %u references left.\n", refcount);
-cleanup:
     IDirect3D8_Release(d3d);
-    DestroyWindow(window);
 
+    test_sanity();
+    depth_clamp_test();
     lighting_test();
     clear_test();
     fog_test();

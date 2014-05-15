@@ -54,6 +54,8 @@
     NSUInteger lastModifierFlags;
 
     NSTimer* liveResizeDisplayTimer;
+    NSRect frameAtResizeStart;
+    BOOL resizingFromLeft, resizingFromTop;
 
     void* imeData;
     BOOL commandDone;
@@ -85,5 +87,7 @@
     - (void) postBroughtForwardEvent;
 
     - (WineWindow*) ancestorWineWindow;
+
+    - (void) updateForCursorClipping;
 
 @end

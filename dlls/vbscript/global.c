@@ -114,16 +114,6 @@ static HRESULT return_int(VARIANT *res, int val)
     return S_OK;
 }
 
-static HRESULT return_bool(VARIANT *res, int val)
-{
-    if(res) {
-        V_VT(res) = VT_BOOL;
-        V_BOOL(res) = val != 0 ? VARIANT_TRUE : VARIANT_FALSE;
-    }
-
-    return S_OK;
-}
-
 static inline HRESULT return_double(VARIANT *res, double val)
 {
     if(res) {
@@ -413,36 +403,46 @@ static HRESULT Global_CLng(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARI
 
 static HRESULT Global_CBool(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    int val;
+    VARIANT v;
+    HRESULT hres;
+
     TRACE("%s\n", debugstr_variant(arg));
 
     assert(args_cnt == 1);
 
-    switch(V_VT(arg)) {
-    case VT_I2:
-        val = V_I2(arg);
-        break;
-    case VT_I4:
-        val = V_I4(arg);
-        break;
-    case VT_R4:
-	val = V_R4(arg) > 0.0 || V_R4(arg) < 0.0;
-        break;
-    case VT_R8:
-        val = V_R8(arg) > 0.0 || V_R8(arg) < 0.0;
-        break;
-    default:
-        ERR("Not a numeric value: %s\n", debugstr_variant(arg));
-        return E_FAIL;
-    }
+    V_VT(&v) = VT_EMPTY;
+    hres = VariantChangeType(&v, arg, VARIANT_LOCALBOOL, VT_BOOL);
+    if(FAILED(hres))
+        return hres;
 
-    return return_bool(res, val);
+    if(res)
+        *res = v;
+    else
+        VariantClear(&v);
+    return S_OK;
 }
 
 static HRESULT Global_CByte(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    VARIANT v;
+    HRESULT hres;
+
+    TRACE("%s\n", debugstr_variant(arg));
+
+    assert(args_cnt == 1);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = VariantChangeType(&v, arg, VARIANT_LOCALBOOL, VT_UI1);
+    if(FAILED(hres))
+        return hres;
+
+    if(!res) {
+        VariantClear(&v);
+        return DISP_E_BADVARTYPE;
+    }
+
+    *res = v;
+    return S_OK;
 }
 
 static HRESULT Global_CDate(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -1141,8 +1141,8 @@ static HRESULT Global_Chr(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIA
         return hres;
 
     if(c < 0 || c >= 0x100) {
-        FIXME("invalid arg\n");
-        return E_FAIL;
+        WARN("invalid arg %d\n", c);
+        return MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
     }
 
     if(res) {

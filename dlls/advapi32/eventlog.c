@@ -378,6 +378,34 @@ BOOL WINAPI GetOldestEventLogRecord( HANDLE hEventLog, PDWORD OldestRecord )
 }
 
 /******************************************************************************
+ * GetTraceEnableFlags [ADVAPI32.@]
+ */
+ULONG WINAPI GetTraceEnableFlags( TRACEHANDLE handle )
+{
+    FIXME("(%s) stub\n", wine_dbgstr_longlong(handle));
+    return 0;
+}
+
+/******************************************************************************
+ * GetTraceEnableLevel [ADVAPI32.@]
+ */
+UCHAR WINAPI GetTraceEnableLevel( TRACEHANDLE handle )
+{
+    FIXME("(%s) stub\n", wine_dbgstr_longlong(handle));
+    return TRACE_LEVEL_VERBOSE;
+}
+
+/******************************************************************************
+ * GetTraceLoggerHandle [ADVAPI32.@]
+ */
+TRACEHANDLE WINAPI GetTraceLoggerHandle( PVOID buf )
+{
+    FIXME("(%p) stub\n", buf);
+    SetLastError(ERROR_ACCESS_DENIED);
+    return INVALID_PROCESSTRACE_HANDLE;
+}
+
+/******************************************************************************
  * NotifyChangeEventLog [ADVAPI32.@]
  *
  * Enables an application to receive notification when an event is written

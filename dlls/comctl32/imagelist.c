@@ -2066,13 +2066,13 @@ ImageList_LoadImageW (HINSTANCE hi, LPCWSTR lpbmp, INT cx, INT cGrow,
  * RETURNS
  *     Success: The newly created image list. It contains a single image
  *              consisting of the second image merged with the first.
- *     Failure: NULL, if either himl1 or himl2 are invalid.
+ *     Failure: NULL, if either himl1 or himl2 is invalid.
  *
  * NOTES
  *   - The returned image list should be deleted by the caller using
  *     ImageList_Destroy() when it is no longer required.
- *   - If either i1 or i2 are not valid image indices they will be treated
- *     as a blank image.
+ *   - If either i1 or i2 is not a valid image index, they will be treated
+ *     as blank images.
  */
 HIMAGELIST WINAPI
 ImageList_Merge (HIMAGELIST himl1, INT i1, HIMAGELIST himl2, INT i2,
@@ -2375,6 +2375,12 @@ ImageList_Remove (HIMAGELIST himl, INT i)
         himl->cCurImage = 0;
         for (nCount = 0; nCount < MAX_OVERLAYIMAGE; nCount++)
              himl->nOvlIdx[nCount] = -1;
+
+        if (himl->has_alpha)
+        {
+            HeapFree( GetProcessHeap(), 0, himl->has_alpha );
+            himl->has_alpha = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, himl->cMaxImage );
+        }
 
         hbmNewImage = ImageList_CreateImage(himl->hdcImage, himl, himl->cMaxImage);
         SelectObject (himl->hdcImage, hbmNewImage);

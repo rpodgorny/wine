@@ -447,6 +447,50 @@ static ULONG WINAPI d3d_texture1_AddRef(IDirect3DTexture *iface)
     return IUnknown_AddRef(surface->texture_outer);
 }
 
+static HRESULT ddraw_surface_set_palette(struct ddraw_surface *surface, IDirectDrawPalette *palette)
+{
+    struct ddraw_palette *palette_impl = unsafe_impl_from_IDirectDrawPalette(palette);
+    struct ddraw_palette *prev;
+
+    TRACE("iface %p, palette %p.\n", surface, palette);
+
+    if (palette_impl && palette_impl->flags & DDPCAPS_ALPHA
+            && !(surface->surface_desc.ddsCaps.dwCaps & DDSCAPS_TEXTURE))
+    {
+        WARN("Alpha palette set on non-texture surface, returning DDERR_INVALIDSURFACETYPE.\n");
+        return DDERR_INVALIDSURFACETYPE;
+    }
+
+    if (!(surface->surface_desc.u4.ddpfPixelFormat.dwFlags & (DDPF_PALETTEINDEXED1 | DDPF_PALETTEINDEXED2
+            | DDPF_PALETTEINDEXED4 | DDPF_PALETTEINDEXED8 | DDPF_PALETTEINDEXEDTO8)))
+        return DDERR_INVALIDPIXELFORMAT;
+
+    wined3d_mutex_lock();
+
+    prev = surface->palette;
+    if (surface->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE)
+    {
+        if (prev)
+            prev->flags &= ~DDPCAPS_PRIMARYSURFACE;
+        if (palette_impl)
+            palette_impl->flags |= DDPCAPS_PRIMARYSURFACE;
+        /* Update the wined3d frontbuffer if this is the primary. */
+        if (surface->ddraw->wined3d_frontbuffer)
+            wined3d_surface_set_palette(surface->ddraw->wined3d_frontbuffer,
+                    palette_impl ? palette_impl->wineD3DPalette : NULL);
+    }
+    if (palette_impl)
+        IDirectDrawPalette_AddRef(&palette_impl->IDirectDrawPalette_iface);
+    if (prev)
+        IDirectDrawPalette_Release(&prev->IDirectDrawPalette_iface);
+    surface->palette = palette_impl;
+    wined3d_surface_set_palette(surface->wined3d_surface, palette_impl ? palette_impl->wineD3DPalette : NULL);
+
+    wined3d_mutex_unlock();
+
+    return DD_OK;
+}
+
 static void ddraw_surface_cleanup(struct ddraw_surface *surface)
 {
     struct ddraw_surface *surf;
@@ -456,7 +500,7 @@ static void ddraw_surface_cleanup(struct ddraw_surface *surface)
 
     /* The refcount test shows that the palette is detached when the surface
      * is destroyed. */
-    IDirectDrawSurface7_SetPalette(&surface->IDirectDrawSurface7_iface, NULL);
+    ddraw_surface_set_palette(surface, NULL);
 
     /* Loop through all complex attached surfaces and destroy them.
      *
@@ -4640,42 +4684,13 @@ static HRESULT WINAPI ddraw_surface1_SetColorKey(IDirectDrawSurface *iface, DWOR
 static HRESULT WINAPI ddraw_surface7_SetPalette(IDirectDrawSurface7 *iface, IDirectDrawPalette *palette)
 {
     struct ddraw_surface *surface = impl_from_IDirectDrawSurface7(iface);
-    struct ddraw_palette *palette_impl = unsafe_impl_from_IDirectDrawPalette(palette);
-    struct ddraw_palette *prev;
 
     TRACE("iface %p, palette %p.\n", iface, palette);
-
-    if (!(surface->surface_desc.u4.ddpfPixelFormat.dwFlags & (DDPF_PALETTEINDEXED1 | DDPF_PALETTEINDEXED2
-            | DDPF_PALETTEINDEXED4 | DDPF_PALETTEINDEXED8 | DDPF_PALETTEINDEXEDTO8)))
-        return DDERR_INVALIDPIXELFORMAT;
 
     if (surface->surface_desc.ddsCaps.dwCaps2 & DDSCAPS2_MIPMAPSUBLEVEL)
         return DDERR_NOTONMIPMAPSUBLEVEL;
 
-    wined3d_mutex_lock();
-
-    prev = surface->palette;
-    if (surface->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE)
-    {
-        if (prev)
-            prev->flags &= ~DDPCAPS_PRIMARYSURFACE;
-        if (palette_impl)
-            palette_impl->flags |= DDPCAPS_PRIMARYSURFACE;
-        /* Update the wined3d frontbuffer if this is the primary. */
-        if (surface->ddraw->wined3d_frontbuffer)
-            wined3d_surface_set_palette(surface->ddraw->wined3d_frontbuffer,
-                    palette_impl ? palette_impl->wineD3DPalette : NULL);
-    }
-    if (palette_impl)
-        IDirectDrawPalette_AddRef(&palette_impl->IDirectDrawPalette_iface);
-    if (prev)
-        IDirectDrawPalette_Release(&prev->IDirectDrawPalette_iface);
-    surface->palette = palette_impl;
-    wined3d_surface_set_palette(surface->wined3d_surface, palette_impl ? palette_impl->wineD3DPalette : NULL);
-
-    wined3d_mutex_unlock();
-
-    return DD_OK;
+    return ddraw_surface_set_palette(surface, palette);
 }
 
 static HRESULT WINAPI ddraw_surface4_SetPalette(IDirectDrawSurface4 *iface, IDirectDrawPalette *palette)
@@ -4684,7 +4699,7 @@ static HRESULT WINAPI ddraw_surface4_SetPalette(IDirectDrawSurface4 *iface, IDir
 
     TRACE("iface %p, palette %p.\n", iface, palette);
 
-    return ddraw_surface7_SetPalette(&surface->IDirectDrawSurface7_iface, palette);
+    return ddraw_surface_set_palette(surface, palette);
 }
 
 static HRESULT WINAPI ddraw_surface3_SetPalette(IDirectDrawSurface3 *iface, IDirectDrawPalette *palette)
@@ -4693,7 +4708,7 @@ static HRESULT WINAPI ddraw_surface3_SetPalette(IDirectDrawSurface3 *iface, IDir
 
     TRACE("iface %p, palette %p.\n", iface, palette);
 
-    return ddraw_surface7_SetPalette(&surface->IDirectDrawSurface7_iface, palette);
+    return ddraw_surface_set_palette(surface, palette);
 }
 
 static HRESULT WINAPI ddraw_surface2_SetPalette(IDirectDrawSurface2 *iface, IDirectDrawPalette *palette)
@@ -4702,7 +4717,7 @@ static HRESULT WINAPI ddraw_surface2_SetPalette(IDirectDrawSurface2 *iface, IDir
 
     TRACE("iface %p, palette %p.\n", iface, palette);
 
-    return ddraw_surface7_SetPalette(&surface->IDirectDrawSurface7_iface, palette);
+    return ddraw_surface_set_palette(surface, palette);
 }
 
 static HRESULT WINAPI ddraw_surface1_SetPalette(IDirectDrawSurface *iface, IDirectDrawPalette *palette)
@@ -4711,7 +4726,7 @@ static HRESULT WINAPI ddraw_surface1_SetPalette(IDirectDrawSurface *iface, IDire
 
     TRACE("iface %p, palette %p.\n", iface, palette);
 
-    return ddraw_surface7_SetPalette(&surface->IDirectDrawSurface7_iface, palette);
+    return ddraw_surface_set_palette(surface, palette);
 }
 
 /**********************************************************
@@ -4967,7 +4982,7 @@ static HRESULT WINAPI d3d_texture2_Load(IDirect3DTexture2 *iface, IDirect3DTextu
 
     for (;;)
     {
-        struct wined3d_palette *wined3d_dst_pal, *wined3d_src_pal;
+        struct ddraw_palette *dst_pal, *src_pal;
         DDSURFACEDESC *src_desc, *dst_desc;
 
         TRACE("Copying surface %p to surface %p (mipmap level %d).\n",
@@ -4977,20 +4992,20 @@ static HRESULT WINAPI d3d_texture2_Load(IDirect3DTexture2 *iface, IDirect3DTextu
         dst_surface->surface_desc.ddsCaps.dwCaps &= ~DDSCAPS_ALLOCONLOAD;
 
         /* Get the palettes */
-        wined3d_dst_pal = wined3d_surface_get_palette(dst_surface->wined3d_surface);
-        wined3d_src_pal = wined3d_surface_get_palette(src_surface->wined3d_surface);
+        dst_pal = dst_surface->palette;
+        src_pal = src_surface->palette;
 
-        if (wined3d_src_pal)
+        if (src_pal)
         {
             PALETTEENTRY palent[256];
 
-            if (!wined3d_dst_pal)
+            if (!dst_pal)
             {
                 wined3d_mutex_unlock();
                 return DDERR_NOPALETTEATTACHED;
             }
-            wined3d_palette_get_entries(wined3d_src_pal, 0, 0, 256, palent);
-            wined3d_palette_set_entries(wined3d_dst_pal, 0, 0, 256, palent);
+            IDirectDrawPalette_GetEntries(&src_pal->IDirectDrawPalette_iface, 0, 0, 256, palent);
+            IDirectDrawPalette_SetEntries(&dst_pal->IDirectDrawPalette_iface, 0, 0, 256, palent);
         }
 
         /* Copy one surface on the other */
@@ -6102,7 +6117,8 @@ HRESULT ddraw_surface_init(struct ddraw_surface *surface, struct ddraw *ddraw, s
 
     if (desc->dwFlags & DDSD_LPSURFACE)
     {
-        if (desc->u1.lPitch < wined3d_surface_get_pitch(wined3d_surface) || desc->u1.lPitch & 3)
+        if (desc->u1.lPitch < wined3d_calculate_format_pitch(ddraw->wined3d, WINED3DADAPTER_DEFAULT,
+                wined3d_desc.format, wined3d_desc.width) || desc->u1.lPitch & 3)
         {
             WARN("Invalid pitch %u specified.\n", desc->u1.lPitch);
             return DDERR_INVALIDPARAMS;
