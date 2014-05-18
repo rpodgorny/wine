@@ -533,12 +533,13 @@ if (0)
 
     IShellFolder_Release(psfSystemDir);
 
-    GetCurrentDirectoryA(MAX_PATH, buf);
-    if(!lstrlenA(buf))
+    cChars = GetCurrentDirectoryA(MAX_PATH, buf);
+    if(!cChars)
     {
         skip("Failed to get current directory, skipping tests.\n");
         return;
     }
+    if(buf[cChars-1] != '\\') lstrcatA(buf, "\\");
 
     SHGetDesktopFolder(&psfDesktop);
 
@@ -546,7 +547,6 @@ if (0)
 
     /* .html */
     lstrcpyA(pathA, buf);
-    lstrcatA(pathA, "\\");
     lstrcatA(pathA, filename_html);
     hfile = CreateFileA(pathA, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
     if(hfile != INVALID_HANDLE_VALUE)
@@ -590,7 +590,6 @@ if (0)
 
     /* .txt */
     lstrcpyA(pathA, buf);
-    lstrcatA(pathA, "\\");
     lstrcatA(pathA, filename_txt);
     hfile = CreateFileA(pathA, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
     if(hfile != INVALID_HANDLE_VALUE)
@@ -604,6 +603,7 @@ if (0)
             hr = IShellFolder_BindToObject(psfDesktop, pidl, NULL, &IID_IShellFolder, (void**)&psfChild);
             ok(hr == E_FAIL || /* Vista+ */
                hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) || /* XP, W2K3 */
+               hr == E_INVALIDARG || /* W2K item in top dir */
                broken(hr == S_OK), /* Win9x, NT4, W2K */
                "Got 0x%08x\n", hr);
             if(SUCCEEDED(hr)) IShellFolder_Release(psfChild);
@@ -616,7 +616,6 @@ if (0)
 
     /* .foo */
     lstrcpyA(pathA, buf);
-    lstrcatA(pathA, "\\");
     lstrcatA(pathA, filename_foo);
     hfile = CreateFileA(pathA, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
     if(hfile != INVALID_HANDLE_VALUE)
@@ -630,6 +629,7 @@ if (0)
             hr = IShellFolder_BindToObject(psfDesktop, pidl, NULL, &IID_IShellFolder, (void**)&psfChild);
             ok(hr == E_FAIL || /* Vista+ */
                hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) || /* XP, W2K3 */
+               hr == E_INVALIDARG || /* W2K item in top dir */
                broken(hr == S_OK), /* Win9x, NT4, W2K */
                "Got 0x%08x\n", hr);
             if(SUCCEEDED(hr)) IShellFolder_Release(psfChild);
@@ -779,7 +779,8 @@ static void test_GetDisplayName(void)
     if (pidlLast->mkid.cb >= 76) {
         ok(!lstrcmpW((WCHAR*)&pidlLast->mkid.abID[46], wszFileName) ||
             (pidlLast->mkid.cb >= 94 && !lstrcmpW((WCHAR*)&pidlLast->mkid.abID[64], wszFileName)) ||  /* Vista */
-            (pidlLast->mkid.cb >= 98 && !lstrcmpW((WCHAR*)&pidlLast->mkid.abID[68], wszFileName)), /* Win7 */
+            (pidlLast->mkid.cb >= 98 && !lstrcmpW((WCHAR*)&pidlLast->mkid.abID[68], wszFileName)) ||  /* Win7 */
+            (pidlLast->mkid.cb >= 102 && !lstrcmpW((WCHAR*)&pidlLast->mkid.abID[72], wszFileName)),   /* Win8 */
             "Filename should be stored as wchar-string at this position!\n");
     }
     
@@ -1853,8 +1854,9 @@ static void test_ITEMIDLIST_format(void) {
                 }
 
                 ok (!lstrcmpW(wszFile[i], name) ||
-                    !lstrcmpW(wszFile[i], name + 9) || /* Vista */
-                    !lstrcmpW(wszFile[i], name + 11), /* Win7 */
+                    !lstrcmpW(wszFile[i], name + 9)  || /* Vista */
+                    !lstrcmpW(wszFile[i], name + 11) || /* Win7 */
+                    !lstrcmpW(wszFile[i], name + 13),   /* Win8 */
                     "The filename should be stored in unicode at this position!\n");
             }
         }
@@ -3969,7 +3971,8 @@ static void test_GetUIObject(void)
                 }
                 max_id_check -= baseItem;
                 ok((max_id_check == max_id) ||
-                   (max_id_check == max_id-1 /* Win 7 */),
+                   (max_id_check == max_id-1) || /* Win 7 */
+                   (max_id_check == max_id-2),   /* Win 8 */
                    "Not equal (or near equal), got %d and %d\n", max_id_check, max_id);
 
 #define is_win2k() (pSHGetFolderPathA && !pSHGetFolderPathAndSubDirA)
