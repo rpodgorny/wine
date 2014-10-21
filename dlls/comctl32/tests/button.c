@@ -743,10 +743,10 @@ todo_wine
     ok(lstrcmpW(nameW, WC_BUTTONW), "got %s\n", wine_dbgstr_w(nameW));
 
     ret = GetClassInfoExW(NULL, nameW, &ex2W);
-todo_wine {
+todo_wine
     ok(ret, "got %d\n", ret);
+if (ret) /* TODO: remove once Wine is fixed */
     ok(ex2W.lpfnWndProc == exW.lpfnWndProc, "got %p, %p\n", exW.lpfnWndProc, ex2W.lpfnWndProc);
-}
 
     /* Check reported class name */
     hwnd = create_button(BS_CHECKBOX, NULL);
@@ -759,7 +759,7 @@ todo_wine {
     ok(!strcmp(buffA, "Button"), "got %s\n", buffA);
     DestroyWindow(hwnd);
 
-    /* explicitely create with versioned class name */
+    /* explicitly create with versioned class name */
     hwnd = CreateWindowExW(0, nameW, testW, BS_CHECKBOX, 0, 0, 50, 14, NULL, 0, 0, NULL);
 todo_wine
     ok(hwnd != NULL, "failed to create a window %s\n", wine_dbgstr_w(nameW));

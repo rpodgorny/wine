@@ -83,10 +83,15 @@ HRESULT CDECL wined3d_palette_get_entries(const struct wined3d_palette *palette,
     return WINED3D_OK;
 }
 
+void CDECL wined3d_palette_apply_to_dc(const struct wined3d_palette *palette, HDC dc)
+{
+    if (SetDIBColorTable(dc, 0, 256, palette->colors) != 256)
+        ERR("Failed to set DIB color table.\n");
+}
+
 HRESULT CDECL wined3d_palette_set_entries(struct wined3d_palette *palette,
         DWORD flags, DWORD start, DWORD count, const PALETTEENTRY *entries)
 {
-    struct wined3d_resource *resource;
     unsigned int i;
 
     TRACE("palette %p, flags %#x, start %u, count %u, entries %p.\n",
@@ -121,17 +126,6 @@ HRESULT CDECL wined3d_palette_set_entries(struct wined3d_palette *palette,
             palette->colors[255].rgbRed = 255;
             palette->colors[255].rgbGreen = 255;
             palette->colors[255].rgbBlue = 255;
-        }
-    }
-
-    /* If the palette is attached to the render target, update all render targets */
-    LIST_FOR_EACH_ENTRY(resource, &palette->device->resources, struct wined3d_resource, resource_list_entry)
-    {
-        if (resource->type == WINED3D_RTYPE_SURFACE)
-        {
-            struct wined3d_surface *surface = surface_from_resource(resource);
-            if (surface->palette == palette)
-                surface->surface_ops->surface_realize_palette(surface);
         }
     }
 

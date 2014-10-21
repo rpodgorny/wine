@@ -516,9 +516,8 @@ static LONG	MMIO_GrabNextBuffer(LPWINE_MMIO wm, int for_read)
 {
     LONG	size = wm->info.cchBuffer;
 
-    TRACE("bo=%x do=%x of=%lx\n",
-	  wm->info.lBufOffset, wm->info.lDiskOffset,
-	  send_message(wm->ioProc, &wm->info, MMIOM_SEEK, 0, SEEK_CUR, FALSE));
+    TRACE("bo=%x do=%x\n",
+	  wm->info.lBufOffset, wm->info.lDiskOffset);
 
     wm->info.lBufOffset = wm->info.lDiskOffset;
     wm->info.pchNext = wm->info.pchBuffer;
@@ -574,7 +573,7 @@ static MMRESULT MMIO_SetBuffer(WINE_MMIO* wm, void* pchBuffer, LONG cchBuffer,
     wm->info.pchEndRead = wm->info.pchBuffer;
     wm->info.pchEndWrite = wm->info.pchBuffer + cchBuffer;
     wm->info.lBufOffset = wm->info.lDiskOffset;
-    wm->bBufferLoaded = FALSE;
+    wm->bBufferLoaded = (wm->info.fccIOProc == FOURCC_MEM);
 
     return MMSYSERR_NOERROR;
 }
@@ -660,9 +659,6 @@ static HMMIO MMIO_Open(LPSTR szFileName, MMIOINFO* refmminfo, DWORD dwOpenFlags,
 	    goto error1;
     }
 
-    if (wm->info.fccIOProc == FOURCC_MEM && !(wm->info.dwFlags & MMIO_ALLOCBUF))
-        wm->bBufferLoaded = TRUE;
-
     /* see mmioDosIOProc for that one */
     memcpy( wm->info.adwInfo, refmminfo->adwInfo, sizeof(wm->info.adwInfo) );
 
@@ -671,7 +667,7 @@ static HMMIO MMIO_Open(LPSTR szFileName, MMIOINFO* refmminfo, DWORD dwOpenFlags,
                                         (LPARAM)szFileName, 0, FALSE);
 
     /* update offsets and grab file size, when possible */
-    if (wm->info.fccIOProc != FOURCC_MEM && (send_message(wm->ioProc, &wm->info, MMIOM_SEEK, 0, SEEK_CUR, FALSE)) != -1) {
+    if (wm->info.fccIOProc == FOURCC_DOS && (send_message(wm->ioProc, &wm->info, MMIOM_SEEK, 0, SEEK_CUR, FALSE)) != -1) {
        pos = wm->info.lBufOffset = wm->info.lDiskOffset;
        send_message(wm->ioProc, &wm->info, MMIOM_SEEK, 0, SEEK_END, FALSE);
        wm->dwFileSize = wm->info.lDiskOffset;
@@ -874,8 +870,12 @@ LONG WINAPI mmioSeek(HMMIO hmmio, LONG lOffset, INT iOrigin)
 	return MMSYSERR_INVALHANDLE;
 
     /* not buffered, direct seek on file */
-    if (!wm->info.pchBuffer)
-	return send_message(wm->ioProc, &wm->info, MMIOM_SEEK, lOffset, iOrigin, FALSE);
+    if (!wm->info.pchBuffer && wm->info.fccIOProc != FOURCC_MEM) {
+	LRESULT ret = send_message(wm->ioProc, &wm->info, MMIOM_SEEK, lOffset, iOrigin, FALSE);
+	if (ret != -1)
+	    wm->info.lBufOffset = wm->info.lDiskOffset;
+	return ret;
+    }
 
     switch (iOrigin) {
     case SEEK_SET:
@@ -885,7 +885,17 @@ LONG WINAPI mmioSeek(HMMIO hmmio, LONG lOffset, INT iOrigin)
 	offset = wm->info.lBufOffset + (wm->info.pchNext - wm->info.pchBuffer) + lOffset;
 	break;
     case SEEK_END:
-	offset = ((wm->info.fccIOProc == FOURCC_MEM)? wm->info.cchBuffer : wm->dwFileSize) - lOffset;
+	switch (wm->info.fccIOProc) {
+	case FOURCC_MEM:
+	    offset = wm->info.cchBuffer - lOffset;
+	    break;
+	case FOURCC_DOS:
+	    offset = wm->dwFileSize - lOffset;
+	    break;
+	default:
+	    offset = send_message(wm->ioProc, &wm->info, MMIOM_SEEK, lOffset, SEEK_END, FALSE);
+	    break;
+	}
 	break;
     default:
 	return -1;
@@ -895,8 +905,8 @@ LONG WINAPI mmioSeek(HMMIO hmmio, LONG lOffset, INT iOrigin)
     /* some memory mapped buffers are defined with -1 as a size */
     if ((wm->info.cchBuffer > 0) &&
 	((offset < wm->info.lBufOffset) ||
-	 (offset >= wm->info.lBufOffset + wm->info.cchBuffer) ||
-	 (offset > wm->dwFileSize && wm->info.fccIOProc != FOURCC_MEM) ||
+	 (offset > wm->info.lBufOffset + wm->info.cchBuffer) ||
+	 (offset > wm->dwFileSize && wm->info.fccIOProc == FOURCC_DOS) ||
 	 !wm->bBufferLoaded)) {
 
 	/* condition to change buffer */
@@ -1023,7 +1033,7 @@ MMRESULT WINAPI mmioAdvance(HMMIO hmmio, MMIOINFO* lpmmioinfo, UINT uFlags)
     if (MMIO_Flush(wm, 0) != MMSYSERR_NOERROR)
 	return MMIOERR_CANNOTWRITE;
 
-    if (lpmmioinfo) {
+    if (lpmmioinfo && lpmmioinfo->fccIOProc == FOURCC_DOS) {
 	wm->dwFileSize = max(wm->dwFileSize, lpmmioinfo->lBufOffset + 
                              (lpmmioinfo->pchNext - lpmmioinfo->pchBuffer));
     }

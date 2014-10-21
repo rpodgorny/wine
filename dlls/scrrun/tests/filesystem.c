@@ -20,6 +20,7 @@
 
 #define COBJMACROS
 #include <stdio.h>
+#include <limits.h>
 
 #include "windows.h"
 #include "ole2.h"
@@ -41,6 +42,7 @@ static inline ULONG get_refcount(IUnknown *iface)
 }
 
 static const WCHAR crlfW[] = {'\r','\n',0};
+static const char utf16bom[] = {0xff,0xfe,0};
 
 #define GET_REFCOUNT(iface) \
     get_refcount((IUnknown*)iface)
@@ -1083,9 +1085,7 @@ static void test_FileCollection(void)
 
     count = 0;
     hr = IFileCollection_get_Count(files, &count);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
-todo_wine
     ok(count == 2, "got %d\n", count);
 
     lstrcpyW(pathW, buffW);
@@ -1096,9 +1096,7 @@ todo_wine
     /* every time property is requested it scans directory */
     count = 0;
     hr = IFileCollection_get_Count(files, &count);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
-todo_wine
     ok(count == 3, "got %d\n", count);
 
     hr = IFileCollection_get__NewEnum(files, NULL);
@@ -1291,20 +1289,29 @@ static void test_DriveCollection(void)
             V_VT(&size) = VT_EMPTY;
             hr = IDrive_get_TotalSize(drive, &size);
             ok(hr == S_OK, "got 0x%08x\n", hr);
-            ok(V_VT(&size) == VT_R8, "got %d\n", V_VT(&size));
-            ok(V_R8(&size) > 0, "got %f\n", V_R8(&size));
+            ok(V_VT(&size) == VT_R8 || V_VT(&size) == VT_I4, "got %d\n", V_VT(&size));
+            if (V_VT(&size) == VT_R8)
+                ok(V_R8(&size) > 0, "got %f\n", V_R8(&size));
+            else
+                ok(V_I4(&size) > 0, "got %d\n", V_I4(&size));
 
             V_VT(&size) = VT_EMPTY;
             hr = IDrive_get_AvailableSpace(drive, &size);
             ok(hr == S_OK, "got 0x%08x\n", hr);
-            ok(V_VT(&size) == VT_R8, "got %d\n", V_VT(&size));
-            ok(V_R8(&size) > 0, "got %f\n", V_R8(&size));
+            ok(V_VT(&size) == VT_R8 || V_VT(&size) == VT_I4, "got %d\n", V_VT(&size));
+            if (V_VT(&size) == VT_R8)
+                ok(V_R8(&size) > (double)INT_MAX, "got %f\n", V_R8(&size));
+            else
+                ok(V_I4(&size) > 0, "got %d\n", V_I4(&size));
 
             V_VT(&size) = VT_EMPTY;
             hr = IDrive_get_FreeSpace(drive, &size);
             ok(hr == S_OK, "got 0x%08x\n", hr);
-            ok(V_VT(&size) == VT_R8, "got %d\n", V_VT(&size));
-            ok(V_R8(&size) > 0, "got %f\n", V_R8(&size));
+            ok(V_VT(&size) == VT_R8 || V_VT(&size) == VT_I4, "got %d\n", V_VT(&size));
+            if (V_VT(&size) == VT_R8)
+                ok(V_R8(&size) > 0, "got %f\n", V_R8(&size));
+            else
+                ok(V_I4(&size) > 0, "got %d\n", V_I4(&size));
         }
         VariantClear(&var);
     }
@@ -1317,8 +1324,7 @@ static void test_CreateTextFile(void)
 {
     static const WCHAR scrrunW[] = {'s','c','r','r','u','n','\\',0};
     static const WCHAR testfileW[] = {'t','e','s','t','.','t','x','t',0};
-    static const WCHAR bomAW[] = {0xff,0xfe,0};
-    WCHAR pathW[MAX_PATH], dirW[MAX_PATH];
+    WCHAR pathW[MAX_PATH], dirW[MAX_PATH], buffW[10];
     ITextStream *stream;
     BSTR nameW, str;
     HANDLE file;
@@ -1365,11 +1371,16 @@ static void test_CreateTextFile(void)
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ITextStream_Release(stream);
 
+    /* File was created in Unicode mode, it contains 0xfffe BOM. Opening it in non-Unicode mode
+       treats BOM like a valuable data with appropriate CP_ACP -> WCHAR conversion. */
+    buffW[0] = 0;
+    MultiByteToWideChar(CP_ACP, 0, utf16bom, -1, buffW, sizeof(buffW)/sizeof(WCHAR));
+
     hr = IFileSystem3_OpenTextFile(fs3, nameW, ForReading, VARIANT_FALSE, TristateFalse, &stream);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     hr = ITextStream_ReadAll(stream, &str);
     ok(hr == S_FALSE || broken(hr == S_OK) /* win2k */, "got 0x%08x\n", hr);
-    ok(!lstrcmpW(str, bomAW), "got %s\n", wine_dbgstr_w(str));
+    ok(!lstrcmpW(str, buffW), "got %s, expected %s\n", wine_dbgstr_w(str), wine_dbgstr_w(buffW));
     SysFreeString(str);
     ITextStream_Release(stream);
 
@@ -1506,7 +1517,9 @@ static void test_ReadAll(void)
     str = NULL;
     hr = ITextStream_ReadAll(stream, &str);
     ok(hr == S_FALSE || broken(hr == S_OK) /* win2k */, "got 0x%08x\n", hr);
-    ok(str[0] == 0x00ff && str[1] == 0x00fe, "got %s, %d\n", wine_dbgstr_w(str), SysStringLen(str));
+    buffW[0] = 0;
+    MultiByteToWideChar(CP_ACP, 0, utf16bom, -1, buffW, sizeof(buffW)/sizeof(WCHAR));
+    ok(str[0] == buffW[0] && str[1] == buffW[1], "got %s, %d\n", wine_dbgstr_w(str), SysStringLen(str));
     SysFreeString(str);
     ITextStream_Release(stream);
 
@@ -1653,7 +1666,11 @@ static void test_Read(void)
     str = NULL;
     hr = ITextStream_Read(stream, 2, &str);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(str[0] == 0x00ff && str[1] == 0x00fe, "got %s, %d\n", wine_dbgstr_w(str), SysStringLen(str));
+
+    buffW[0] = 0;
+    MultiByteToWideChar(CP_ACP, 0, utf16bom, -1, buffW, sizeof(buffW)/sizeof(WCHAR));
+
+    ok(!lstrcmpW(str, buffW), "got %s, expected %s\n", wine_dbgstr_w(str), wine_dbgstr_w(buffW));
     ok(SysStringLen(str) == 2, "got %d\n", SysStringLen(str));
     SysFreeString(str);
     ITextStream_Release(stream);
@@ -1731,6 +1748,121 @@ todo_wine
     SysFreeString(nameW);
 }
 
+struct getdrivename_test {
+    const WCHAR path[10];
+    const WCHAR drive[5];
+};
+
+static const struct getdrivename_test getdrivenametestdata[] = {
+    { {'C',':','\\','1','.','t','s','t',0}, {'C',':',0} },
+    { {'O',':','\\','1','.','t','s','t',0}, {'O',':',0} },
+    { {'O',':',0}, {'O',':',0} },
+    { {'o',':',0}, {'o',':',0} },
+    { {'O','O',':',0} },
+    { {':',0} },
+    { {'O',0} },
+    { { 0 } }
+};
+
+static void test_GetDriveName(void)
+{
+    const struct getdrivename_test *ptr = getdrivenametestdata;
+    HRESULT hr;
+    BSTR name;
+
+    hr = IFileSystem3_GetDriveName(fs3, NULL, NULL);
+    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+
+    name = (void*)0xdeadbeef;
+    hr = IFileSystem3_GetDriveName(fs3, NULL, &name);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(name == NULL, "got %p\n", name);
+
+    while (*ptr->path) {
+        BSTR path = SysAllocString(ptr->path);
+        name = (void*)0xdeadbeef;
+        hr = IFileSystem3_GetDriveName(fs3, path, &name);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        if (name)
+            ok(!lstrcmpW(ptr->drive, name), "got %s, expected %s\n", wine_dbgstr_w(name), wine_dbgstr_w(ptr->drive));
+        else
+            ok(!*ptr->drive, "got %s, expected %s\n", wine_dbgstr_w(name), wine_dbgstr_w(ptr->drive));
+        SysFreeString(path);
+        SysFreeString(name);
+        ptr++;
+    }
+}
+
+static void test_SerialNumber(void)
+{
+    IDriveCollection *drives;
+    IEnumVARIANT *iter;
+    IDrive *drive;
+    LONG serial;
+    HRESULT hr;
+    BSTR name;
+
+    hr = IFileSystem3_get_Drives(fs3, &drives);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDriveCollection_get__NewEnum(drives, (IUnknown**)&iter);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IDriveCollection_Release(drives);
+
+    while (1) {
+        DriveTypeConst type;
+        VARIANT var;
+
+        hr = IEnumVARIANT_Next(iter, 1, &var, NULL);
+        if (hr == S_FALSE) {
+            skip("No fixed drive found, skipping test.\n");
+            IEnumVARIANT_Release(iter);
+            return;
+        }
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        hr = IDispatch_QueryInterface(V_DISPATCH(&var), &IID_IDrive, (void**)&drive);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        VariantClear(&var);
+
+        hr = IDrive_get_DriveType(drive, &type);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        if (type == Fixed)
+            break;
+
+        IDrive_Release(drive);
+    }
+
+    hr = IDrive_get_SerialNumber(drive, NULL);
+    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+
+    serial = 0xdeadbeef;
+    hr = IDrive_get_SerialNumber(drive, &serial);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(serial != 0xdeadbeef, "got %x\n", serial);
+
+    hr = IDrive_get_FileSystem(drive, NULL);
+    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+
+    name = NULL;
+    hr = IDrive_get_FileSystem(drive, &name);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(name != NULL, "got %p\n", name);
+    SysFreeString(name);
+
+    hr = IDrive_get_VolumeName(drive, NULL);
+    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+
+    name = NULL;
+    hr = IDrive_get_VolumeName(drive, &name);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(name != NULL, "got %p\n", name);
+    SysFreeString(name);
+
+    IDrive_Release(drive);
+    IEnumVARIANT_Release(iter);
+}
+
 START_TEST(filesystem)
 {
     HRESULT hr;
@@ -1763,6 +1895,8 @@ START_TEST(filesystem)
     test_WriteLine();
     test_ReadAll();
     test_Read();
+    test_GetDriveName();
+    test_SerialNumber();
 
     IFileSystem3_Release(fs3);
 

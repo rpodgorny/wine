@@ -62,11 +62,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(menu);
 WINE_DECLARE_DEBUG_CHANNEL(accel);
 
-/* internal popup menu window messages */
-
-#define MM_SETMENUHANDLE	(WM_USER + 0)
-#define MM_GETMENUHANDLE	(WM_USER + 1)
-
 /* Menu item structure */
 typedef struct {
     /* ----------- MENUITEMINFO Stuff ----------- */
@@ -126,8 +121,6 @@ typedef struct
     HWND	hOwnerWnd;    /* where notifications are sent */
     POINT	pt;
 } MTRACKER;
-
-#define MENU_MAGIC   0x554d  /* 'MU' */
 
 #define ITEM_PREV		-1
 #define ITEM_NEXT		 1
@@ -2624,13 +2617,14 @@ static INT MENU_ButtonUp( MTRACKER* pmt, HMENU hPtMenu, UINT wFlags)
                 return executedMenuId;
 	    }
 
-	    /* If we are dealing with the top-level menu            */
+	    /* If we are dealing with the menu bar                  */
 	    /* and this is a click on an already "popped" item:     */
 	    /* Stop the menu tracking and close the opened submenus */
 	    if((pmt->hTopMenu == hPtMenu) && ptmenu->bTimeToHide)
 		return 0;
 	}
-	ptmenu->bTimeToHide = TRUE;
+	if( GetMenu(ptmenu->hWnd) == hPtMenu )
+	    ptmenu->bTimeToHide = TRUE;
     }
     return -1;
 }
@@ -3567,11 +3561,6 @@ LRESULT WINAPI PopupMenuWndProc( HWND hwnd, UINT message, WPARAM wParam, LPARAM 
             SetWindowLongPtrW( hwnd, 0, 0 );
 	break;
 
-    case MM_SETMENUHANDLE:
-        SetWindowLongPtrW( hwnd, 0, wParam );
-        break;
-
-    case MM_GETMENUHANDLE:
     case MN_GETHMENU:
         return GetWindowLongPtrW( hwnd, 0 );
 
@@ -4371,6 +4360,8 @@ BOOL WINAPI DrawMenuBar( HWND hWnd )
 
     if (!IsWindow( hWnd ))
         return FALSE;
+    if (!WIN_ALLOWED_MENU(GetWindowLongW( hWnd, GWL_STYLE )))
+        return TRUE;
 
     if ((hMenu = GetMenu( hWnd )) && (lppop = MENU_GetMenu( hMenu ))) {
         lppop->Height = 0; /* Make sure we call MENU_MenuBarCalcSize */
@@ -4594,12 +4585,12 @@ static BOOL GetMenuItemInfo_common ( HMENU hmenu, UINT item, BOOL bypos,
     if ((lpmii->fMask & (MIIM_TYPE|MIIM_STRING))) {
          if( !menu->text ) {
                 if(lpmii->dwTypeData && lpmii->cch) {
-                    lpmii->cch = 0;
                     if( unicode)
                         *((WCHAR *)lpmii->dwTypeData) = 0;
                     else
                         *((CHAR *)lpmii->dwTypeData) = 0;
                 }
+                lpmii->cch = 0;
          } else {
             int len;
             if (unicode)

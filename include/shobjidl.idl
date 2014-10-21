@@ -589,6 +589,7 @@ cpp_quote("HRESULT WINAPI SHGetIDListFromObject(IUnknown *punk, PIDLIST_ABSOLUTE
 cpp_quote("HRESULT WINAPI SHGetItemFromObject(IUnknown *punk, REFIID riid, void **ppv);")
 cpp_quote("HRESULT WINAPI SHCreateShellItemArray(PCIDLIST_ABSOLUTE pidlParent, IShellFolder* psf, UINT cidl, PCUITEMID_CHILD_ARRAY ppidl, IShellItemArray **ppsiItemArray);")
 cpp_quote("HRESULT WINAPI SHCreateShellItemArrayFromShellItem(IShellItem *psi, REFIID riid, void **ppv);")
+cpp_quote("HRESULT WINAPI SHCreateShellItemArrayFromIDLists(UINT cidl, PCIDLIST_ABSOLUTE_ARRAY pidl_array, IShellItemArray **psia);")
 cpp_quote("HRESULT WINAPI SHCreateShellItemArrayFromDataObject(IDataObject *pdo, REFIID riid, void **ppv);")
 
 /*****************************************************************************
@@ -3350,7 +3351,7 @@ interface ITransferAdviseSink : IUnknown
     HRESULT FileFailure([in] IShellItem *item,
                         [in, unique, string] LPCWSTR itemname,
                         [in] HRESULT hr,
-                        [out, unique, size_is(crename)] LPWSTR rename,
+                        [in, out, unique, size_is(crename)] LPWSTR rename,
                         [in] ULONG crename);
     HRESULT SubStreamFailure([in] IShellItem *item,
                              [in, string] LPCWSTR stream,

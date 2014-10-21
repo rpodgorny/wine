@@ -22,7 +22,6 @@
 #define COBJMACROS
 #include "config.h"
 #include "wine/port.h"
-#include "wine/debug.h"
 
 #include <stdarg.h>
 #include <assert.h>
@@ -38,6 +37,8 @@
 #include "winhttp.h"
 
 #include "winhttp_private.h"
+
+#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winhttp);
 
@@ -2991,7 +2992,7 @@ static HRESULT WINAPI winhttp_request_Open(
     path[uc.dwUrlPathLength + uc.dwExtraInfoLength] = 0;
 
     if (!(verb = strdupW( method ))) goto error;
-    if (V_BOOL( &async )) flags |= WINHTTP_FLAG_ASYNC;
+    if (V_VT( &async ) == VT_BOOL && V_BOOL( &async )) flags |= WINHTTP_FLAG_ASYNC;
     if (!(hsession = WinHttpOpen( user_agentW, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, NULL, NULL, flags )))
     {
         err = get_last_error();
@@ -3351,7 +3352,7 @@ static HRESULT request_send( struct winhttp_request *request )
         {
             sa = V_ARRAY( &data );
             if ((hr = SafeArrayAccessData( sa, (void **)&ptr )) != S_OK) return hr;
-            if ((hr = SafeArrayGetUBound( sa, 1, &size ) != S_OK))
+            if ((hr = SafeArrayGetUBound( sa, 1, &size )) != S_OK)
             {
                 SafeArrayUnaccessData( sa );
                 return hr;

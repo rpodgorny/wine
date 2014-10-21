@@ -241,11 +241,9 @@ static BOOL matches_domain_pattern(LPCWSTR pattern, LPCWSTR str, BOOL implicit_w
              *
              * Doesn't match the pattern.
              */
-            if(str_len > pattern_len) {
-                if(str[str_len-pattern_len-1] == '.' && !strcmpiW(str+(str_len-pattern_len), pattern)) {
-                    matches = TRUE;
-                    *matched = str+(str_len-pattern_len);
-                }
+            if(str[str_len-pattern_len-1] == '.' && !strcmpiW(str+(str_len-pattern_len), pattern)) {
+                matches = TRUE;
+                *matched = str+(str_len-pattern_len);
             }
         } else {
             /* The pattern doesn't have an implicit wildcard, or an explicit wildcard,
@@ -742,7 +740,7 @@ static HRESULT generate_security_id(IUri *uri, BYTE *secid, DWORD *secid_len, DW
 
         if(len+sizeof(DWORD) > *secid_len) {
             SysFreeString(display_uri);
-            return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+            return E_NOT_SUFFICIENT_BUFFER;
         }
 
         WideCharToMultiByte(CP_ACP, 0, display_uri, -1, (LPSTR)secid, len, NULL, NULL);
@@ -778,7 +776,7 @@ static HRESULT generate_security_id(IUri *uri, BYTE *secid, DWORD *secid_len, DW
         if(len+sizeof(DWORD) > *secid_len) {
             SysFreeString(host);
             SysFreeString(scheme);
-            return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+            return E_NOT_SUFFICIENT_BUFFER;
         }
 
         WideCharToMultiByte(CP_ACP, 0, scheme, -1, (LPSTR)secid, len, NULL, NULL);
@@ -2077,7 +2075,7 @@ HRESULT WINAPI CompareSecurityIds(BYTE *secid1, DWORD size1, BYTE *secid2, DWORD
 /********************************************************************
  *      IsInternetESCEnabledLocal (URLMON.108)
  *
- * Undocumented, returns if IE is running in Enhanced Security Configuration.
+ * Undocumented, returns TRUE if IE is running in Enhanced Security Configuration.
  */
 BOOL WINAPI IsInternetESCEnabledLocal(void)
 {

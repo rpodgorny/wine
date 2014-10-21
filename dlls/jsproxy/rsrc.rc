@@ -1,7 +1,5 @@
 /*
- * WinInet
- *
- * Copyright (c) 2000 Patrik Stridvall
+ * Copyright 2014 Hans Leidekker for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,25 +16,5 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-
-#include "windef.h"
-#include "winbase.h"
-#include "winerror.h"
-#include "winreg.h"
-#include "shlwapi.h"
-
-#include "wine/debug.h"
-
-WINE_DEFAULT_DEBUG_CHANNEL(wininet);
-
-/***********************************************************************
- *		DllInstall (WININET.@)
- */
-HRESULT WINAPI DllInstall(BOOL bInstall, LPCWSTR cmdline)
-{
-  FIXME("(%s, %s): stub\n", bInstall?"TRUE":"FALSE",
-	debugstr_w(cmdline));
-
-  return S_OK;
-}
+/* @makedep: pac.js */
+pac.js 40 "pac.js"

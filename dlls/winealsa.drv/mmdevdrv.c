@@ -889,9 +889,21 @@ static ULONG WINAPI AudioClient_Release(IAudioClient *iface)
 {
     ACImpl *This = impl_from_IAudioClient(iface);
     ULONG ref;
+
     ref = InterlockedDecrement(&This->ref);
     TRACE("(%p) Refcount now %u\n", This, ref);
     if(!ref){
+        if(This->timer){
+            HANDLE event;
+            DWORD wait;
+            event = CreateEventW(NULL, TRUE, FALSE, NULL);
+            wait = !DeleteTimerQueueTimer(g_timer_q, This->timer, event);
+            wait = wait && GetLastError() == ERROR_IO_PENDING;
+            if(event && wait)
+                WaitForSingleObject(event, INFINITE);
+            CloseHandle(event);
+        }
+
         IAudioClient_Stop(iface);
         IMMDevice_Release(This->parent);
         IUnknown_Release(This->pUnkFTMarshal);
@@ -1416,6 +1428,8 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient *iface,
      * ALSA period 220 vs.  221 frames in mmdevapi and
      *      buffer 883 vs. 2205 frames in mmdevapi! */
     This->bufsize_frames = MulDiv(duration, fmt->nSamplesPerSec, 10000000);
+    if(mode == AUDCLNT_SHAREMODE_EXCLUSIVE)
+        This->bufsize_frames -= This->bufsize_frames % This->mmdev_period_frames;
     This->hidden_frames = This->alsa_period_frames + This->mmdev_period_frames +
         MulDiv(fmt->nSamplesPerSec, EXTRA_SAFE_RT, 10000000);
 
@@ -2189,11 +2203,13 @@ static HRESULT WINAPI AudioClient_Start(IAudioClient *iface)
                 This->bufsize_frames);
     }
 
-    if(!CreateTimerQueueTimer(&This->timer, g_timer_q, alsa_push_buffer_data,
-            This, 0, This->mmdev_period_rt / 10000, WT_EXECUTEINTIMERTHREAD)){
-        LeaveCriticalSection(&This->lock);
-        WARN("Unable to create timer: %u\n", GetLastError());
-        return E_OUTOFMEMORY;
+    if(!This->timer){
+        if(!CreateTimerQueueTimer(&This->timer, g_timer_q, alsa_push_buffer_data,
+                This, 0, This->mmdev_period_rt / 10000, WT_EXECUTEINTIMERTHREAD)){
+            LeaveCriticalSection(&This->lock);
+            WARN("Unable to create timer: %u\n", GetLastError());
+            return E_OUTOFMEMORY;
+        }
     }
 
     This->started = TRUE;
@@ -2206,8 +2222,6 @@ static HRESULT WINAPI AudioClient_Start(IAudioClient *iface)
 static HRESULT WINAPI AudioClient_Stop(IAudioClient *iface)
 {
     ACImpl *This = impl_from_IAudioClient(iface);
-    HANDLE event;
-    BOOL wait;
 
     TRACE("(%p)\n", This);
 
@@ -2223,23 +2237,9 @@ static HRESULT WINAPI AudioClient_Stop(IAudioClient *iface)
         return S_FALSE;
     }
 
-    /* Stop without losing written frames or position.
-     * snd_pcm_pause would be appropriate but is unsupported by dmix.
-     * snd_pcm_drain yields EAGAIN in NONBLOCK mode, except with Pulse. */
-
-    event = CreateEventW(NULL, TRUE, FALSE, NULL);
-    wait = !DeleteTimerQueueTimer(g_timer_q, This->timer, event);
-    if(wait)
-        WARN("DeleteTimerQueueTimer error %u\n", GetLastError());
-    wait = wait && GetLastError() == ERROR_IO_PENDING;
-
     This->started = FALSE;
 
     LeaveCriticalSection(&This->lock);
-
-    if(event && wait)
-        WaitForSingleObject(event, INFINITE);
-    CloseHandle(event);
 
     return S_OK;
 }
@@ -2820,7 +2820,10 @@ static HRESULT WINAPI AudioClock_GetFrequency(IAudioClock *iface, UINT64 *freq)
 
     TRACE("(%p)->(%p)\n", This, freq);
 
-    *freq = This->fmt->nSamplesPerSec;
+    if(This->share == AUDCLNT_SHAREMODE_SHARED)
+        *freq = (UINT64)This->fmt->nSamplesPerSec * This->fmt->nBlockAlign;
+    else
+        *freq = This->fmt->nSamplesPerSec;
 
     return S_OK;
 }
@@ -2877,7 +2880,10 @@ static HRESULT WINAPI AudioClock_GetPosition(IAudioClock *iface, UINT64 *pos,
     TRACE("frames written: %u, held: %u, avail: %ld, delay: %ld state %d, pos: %u\n",
           (UINT32)(written_frames%1000000000), held_frames,
           avail_frames, delay_frames, alsa_state, (UINT32)(position%1000000000));
-    *pos = position;
+    if(This->share == AUDCLNT_SHAREMODE_SHARED)
+        *pos = position * This->fmt->nBlockAlign;
+    else
+        *pos = position;
 
     if(qpctime){
         LARGE_INTEGER stamp, freq;

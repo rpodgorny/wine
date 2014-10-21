@@ -176,15 +176,13 @@ static HRESULT STDMETHODCALLTYPE d3d10_texture2d_Map(ID3D10Texture2D *iface, UIN
     TRACE("iface %p, sub_resource_idx %u, map_type %u, map_flags %#x, mapped_texture %p.\n",
             iface, sub_resource_idx, map_type, map_flags, mapped_texture);
 
-    if (map_type != D3D10_MAP_READ_WRITE)
-        FIXME("Ignoring map_type %#x.\n", map_type);
     if (map_flags)
         FIXME("Ignoring map_flags %#x.\n", map_flags);
 
     if (!(sub_resource = wined3d_texture_get_sub_resource(texture->wined3d_texture, sub_resource_idx)))
         hr = E_INVALIDARG;
     else if (SUCCEEDED(hr = wined3d_surface_map(wined3d_surface_from_resource(sub_resource),
-            &wined3d_map_desc, NULL, 0)))
+            &wined3d_map_desc, NULL, wined3d_map_flags_from_d3d10_map_type(map_type))))
     {
         mapped_texture->pData = wined3d_map_desc.data;
         mapped_texture->RowPitch = wined3d_map_desc.row_pitch;
@@ -236,6 +234,14 @@ static const struct ID3D10Texture2DVtbl d3d10_texture2d_vtbl =
     d3d10_texture2d_GetDesc,
 };
 
+struct d3d10_texture2d *unsafe_impl_from_ID3D10Texture2D(ID3D10Texture2D *iface)
+{
+    if (!iface)
+        return NULL;
+    assert(iface->lpVtbl == &d3d10_texture2d_vtbl);
+    return CONTAINING_RECORD(iface, struct d3d10_texture2d, ID3D10Texture2D_iface);
+}
+
 static const struct wined3d_parent_ops d3d10_texture2d_wined3d_parent_ops =
 {
     d3d10_texture2d_wined3d_object_released,
@@ -253,6 +259,7 @@ HRESULT d3d10_texture2d_init(struct d3d10_texture2d *texture, struct d3d10_devic
 
     if (desc->MipLevels == 1 && desc->ArraySize == 1)
     {
+        DXGI_SURFACE_DESC surface_desc;
         IWineDXGIDevice *wine_device;
 
         if (FAILED(hr = ID3D10Device1_QueryInterface(&device->ID3D10Device1_iface, &IID_IWineDXGIDevice,
@@ -262,7 +269,12 @@ HRESULT d3d10_texture2d_init(struct d3d10_texture2d *texture, struct d3d10_devic
             return E_FAIL;
         }
 
-        hr = IWineDXGIDevice_create_surface(wine_device, NULL, 0, NULL,
+        surface_desc.Width = desc->Width;
+        surface_desc.Height = desc->Height;
+        surface_desc.Format = desc->Format;
+        surface_desc.SampleDesc = desc->SampleDesc;
+
+        hr = IWineDXGIDevice_create_surface(wine_device, &surface_desc, 0, NULL,
                 (IUnknown *)&texture->ID3D10Texture2D_iface, (void **)&texture->dxgi_surface);
         IWineDXGIDevice_Release(wine_device);
         if (FAILED(hr))
@@ -437,15 +449,13 @@ static HRESULT STDMETHODCALLTYPE d3d10_texture3d_Map(ID3D10Texture3D *iface, UIN
     TRACE("iface %p, sub_resource_idx %u, map_type %u, map_flags %#x, mapped_texture %p.\n",
             iface, sub_resource_idx, map_type, map_flags, mapped_texture);
 
-    if (map_type != D3D10_MAP_READ_WRITE)
-        FIXME("Ignoring map_type %#x.\n", map_type);
     if (map_flags)
         FIXME("Ignoring map_flags %#x.\n", map_flags);
 
     if (!(sub_resource = wined3d_texture_get_sub_resource(texture->wined3d_texture, sub_resource_idx)))
         hr = E_INVALIDARG;
     else if (SUCCEEDED(hr = wined3d_volume_map(wined3d_volume_from_resource(sub_resource),
-            &wined3d_map_desc, NULL, 0)))
+            &wined3d_map_desc, NULL, wined3d_map_flags_from_d3d10_map_type(map_type))))
     {
         mapped_texture->pData = wined3d_map_desc.data;
         mapped_texture->RowPitch = wined3d_map_desc.row_pitch;

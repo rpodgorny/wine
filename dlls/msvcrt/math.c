@@ -766,6 +766,14 @@ MSVCRT_long CDECL MSVCRT_labs( MSVCRT_long n )
 }
 
 /*********************************************************************
+ *		llabs (MSVCRT.@)
+ */
+MSVCRT_longlong CDECL MSVCRT_llabs( MSVCRT_longlong n )
+{
+    return n >= 0 ? n : -n;
+}
+
+/*********************************************************************
  *		_abs64 (MSVCRT.@)
  */
 __int64 CDECL _abs64( __int64 n )
@@ -2191,9 +2199,9 @@ void __cdecl __libm_sse2_tanf(void)
 void __cdecl __libm_sse2_sqrt_precise(void)
 {
     double d;
-    __asm__ __volatile__( "movd %%xmm0,%0" : "=m" (d) );
+    __asm__ __volatile__( "movq %%xmm0,%0" : "=m" (d) );
     d = sqrt( d );
-    __asm__ __volatile__( "movd %0,%%xmm0" : : "m" (d) );
+    __asm__ __volatile__( "movq %0,%%xmm0" : : "m" (d) );
 }
 
 #endif  /* __i386__ */

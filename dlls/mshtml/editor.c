@@ -263,7 +263,7 @@ static void remove_child_attr(nsIDOMElement *elem, LPCWSTR tag, nsAString *attr_
 static void get_font_size(HTMLDocument *This, WCHAR *ret)
 {
     nsISelection *nsselection = get_ns_selection(This);
-    nsIDOMElement *elem = NULL;
+    nsIDOMHTMLElement *elem = NULL;
     nsIDOMNode *node = NULL, *tmp_node;
     nsAString tag_str;
     LPCWSTR tag;
@@ -284,36 +284,29 @@ static void get_font_size(HTMLDocument *This, WCHAR *ret)
             break;
 
         if(node_type == ELEMENT_NODE) {
-            nsIDOMNode_QueryInterface(node, &IID_nsIDOMElement, (void**)&elem);
+            nsIDOMNode_QueryInterface(node, &IID_nsIDOMHTMLElement, (void**)&elem);
 
             nsAString_Init(&tag_str, NULL);
-            nsIDOMElement_GetTagName(elem, &tag_str);
+            nsIDOMHTMLElement_GetTagName(elem, &tag_str);
             nsAString_GetData(&tag_str, &tag);
 
             if(!strcmpiW(tag, fontW)) {
-                nsAString size_str, val_str;
-                LPCWSTR val;
+                nsAString val_str;
+                const PRUnichar *val;
 
                 TRACE("found font tag %p\n", elem);
 
-                nsAString_InitDepend(&size_str, sizeW);
-                nsAString_Init(&val_str, NULL);
-
-                nsIDOMElement_GetAttribute(elem, &size_str, &val_str);
-                nsAString_GetData(&val_str, &val);
-
+                get_elem_attr_value(elem, sizeW, &val_str, &val);
                 if(*val) {
                     TRACE("found size %s\n", debugstr_w(val));
                     strcpyW(ret, val);
                 }
 
-                nsAString_Finish(&size_str);
                 nsAString_Finish(&val_str);
             }
 
             nsAString_Finish(&tag_str);
-
-            nsIDOMElement_Release(elem);
+            nsIDOMHTMLElement_Release(elem);
         }
 
         if(*ret)
@@ -1177,13 +1170,14 @@ static HRESULT exec_hyperlink(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in,
 
     /* create an element with text of URL */
     if (insert_link_at_caret) {
-        nsIDOMNode *text_node, *unused_node;
+        nsIDOMNode *unused_node;
+        nsIDOMText *text_node;
 
-        nsIDOMHTMLDocument_CreateTextNode(This->doc_node->nsdoc, &ns_url, (nsIDOMText **)&text_node);
+        nsIDOMHTMLDocument_CreateTextNode(This->doc_node->nsdoc, &ns_url, &text_node);
 
         /* wrap the <a> tags around the text element */
-        nsIDOMHTMLElement_AppendChild(anchor_elem, text_node, &unused_node);
-        nsIDOMNode_Release(text_node);
+        nsIDOMHTMLElement_AppendChild(anchor_elem, (nsIDOMNode*)text_node, &unused_node);
+        nsIDOMText_Release(text_node);
         nsIDOMNode_Release(unused_node);
     }
 

@@ -4,7 +4,14 @@ IMPORTS   = user32 gdi32
 
 C_SRCS = \
 	analyzer.c \
+	bidi.c \
+	bracket.c \
 	font.c \
 	gdiinterop.c \
 	layout.c \
-	main.c
+	linebreak.c \
+	main.c \
+	mirror.c \
+	opentype.c \
+	scripts.c \
+	shape.c

@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Henri Verbeet for CodeWeavers
+ * Copyright 2014 Andrew Eikum for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -14,35 +14,11 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
- *
  */
 
-#include "config.h"
-#include "wine/port.h"
-#include "wine/debug.h"
+#include <windef.h>
 
-#define COBJMACROS
-#include "d2d1.h"
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 
-WINE_DEFAULT_DEBUG_CHANNEL(d2d);
-
-BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
-{
-    switch (reason)
-    {
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(inst);
-            break;
-    }
-
-    return TRUE;
-}
-
-HRESULT WINAPI D2D1CreateFactory(D2D1_FACTORY_TYPE factory_type, REFIID iid,
-        const D2D1_FACTORY_OPTIONS *factory_options, void **factory)
-{
-    FIXME("factory_type %#x, iid %s, factory_options %p, factory %p stub!\n",
-            factory_type, debugstr_guid(iid), factory_options, factory);
-
-    return E_NOTIMPL;
-}
+/* @makedep: packager.rgs */
+1 WINE_REGISTRY packager.rgs

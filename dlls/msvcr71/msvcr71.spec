@@ -166,7 +166,7 @@
 @ cdecl __p__amblksiz()
 @ cdecl __p__commode()
 @ cdecl __p__daylight() MSVCRT___p__daylight
-@ cdecl __p__dstbias()
+@ cdecl __p__dstbias() MSVCRT___p__dstbias
 @ cdecl __p__environ() MSVCRT___p__environ
 @ stub __p__fileinfo()
 @ cdecl __p__fmode()
@@ -594,7 +594,7 @@
 @ cdecl _wcserror(long) MSVCRT__wcserror
 @ cdecl _wcsicmp(wstr wstr) MSVCRT__wcsicmp
 @ cdecl _wcsicoll(wstr wstr) MSVCRT__wcsicoll
-@ cdecl _wcslwr(wstr) ntdll._wcslwr
+@ cdecl _wcslwr(wstr) MSVCRT__wcslwr
 @ cdecl _wcsncoll(wstr wstr long) MSVCRT__wcsncoll
 @ cdecl _wcsnicmp(wstr wstr long) MSVCRT__wcsnicmp
 @ cdecl _wcsnicoll(wstr wstr long) MSVCRT__wcsnicoll
@@ -866,7 +866,7 @@
 @ cdecl wcstol(wstr ptr long) ntdll.wcstol
 @ cdecl wcstombs(ptr ptr long) MSVCRT_wcstombs
 @ cdecl wcstoul(wstr ptr long) MSVCRT_wcstoul
-@ stub wcsxfrm(ptr wstr long)
+@ cdecl wcsxfrm(ptr wstr long) MSVCRT_wcsxfrm
 @ cdecl wctomb(ptr long) MSVCRT_wctomb
 @ varargs wprintf(wstr) MSVCRT_wprintf
 @ varargs wscanf(wstr) MSVCRT_wscanf

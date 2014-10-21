@@ -59,6 +59,7 @@
 #define MSVCRT__MAX_FNAME  256
 #define MSVCRT__MAX_EXT    256
 
+typedef unsigned char  MSVCRT_bool;
 typedef unsigned short MSVCRT_wchar_t;
 typedef unsigned short MSVCRT_wint_t;
 typedef unsigned short MSVCRT_wctype_t;
@@ -66,6 +67,7 @@ typedef unsigned short MSVCRT__ino_t;
 typedef unsigned int   MSVCRT__fsize_t;
 typedef int            MSVCRT_long;
 typedef unsigned int   MSVCRT_ulong;
+typedef __int64        MSVCRT_longlong;
 #ifdef _WIN64
 typedef unsigned __int64 MSVCRT_size_t;
 typedef __int64 MSVCRT_intptr_t;
@@ -232,7 +234,10 @@ extern unsigned int MSVCRT___lc_codepage;
 extern int MSVCRT___lc_collate_cp;
 extern WORD MSVCRT__ctype [257];
 
-void   msvcrt_set_errno(int) DECLSPEC_HIDDEN;
+void msvcrt_set_errno(int) DECLSPEC_HIDDEN;
+#if _MSVCR_VER >= 80
+void throw_bad_alloc(const char*) DECLSPEC_HIDDEN;
+#endif
 
 void __cdecl _purecall(void);
 void __cdecl _amsg_exit(int errnum);
@@ -260,7 +265,7 @@ typedef void  (__cdecl *free_func_t)(void*);
 
 /* Setup and teardown multi threaded locks */
 extern void msvcrt_init_mt_locks(void) DECLSPEC_HIDDEN;
-extern void msvcrt_free_mt_locks(void) DECLSPEC_HIDDEN;
+extern void msvcrt_free_locks(void) DECLSPEC_HIDDEN;
 
 extern void msvcrt_init_exception(void*) DECLSPEC_HIDDEN;
 extern BOOL msvcrt_init_locale(void) DECLSPEC_HIDDEN;
@@ -739,6 +744,7 @@ struct MSVCRT__stat64 {
 #define MSVCRT__IOERR    0x0020
 #define MSVCRT__IOSTRG   0x0040
 #define MSVCRT__IORW     0x0080
+#define MSVCRT__USERBUF  0x0100
 #define MSVCRT__IOCOMMIT 0x4000
 
 #define MSVCRT__S_IEXEC  0x0040
@@ -913,13 +919,18 @@ int __cdecl      MSVCRT_fgetc(MSVCRT_FILE*);
 int __cdecl      MSVCRT_ungetc(int,MSVCRT_FILE*);
 MSVCRT_wint_t __cdecl MSVCRT_fgetwc(MSVCRT_FILE*);
 MSVCRT_wint_t __cdecl MSVCRT_ungetwc(MSVCRT_wint_t,MSVCRT_FILE*);
+int __cdecl      MSVCRT__fseeki64_nolock(MSVCRT_FILE*,__int64,int);
 __int64 __cdecl  MSVCRT__ftelli64(MSVCRT_FILE* file);
+__int64 __cdecl  MSVCRT__ftelli64_nolock(MSVCRT_FILE*);
 void __cdecl     MSVCRT__exit(int);
 void __cdecl     MSVCRT_abort(void);
 MSVCRT_ulong* __cdecl MSVCRT___doserrno(void);
 int* __cdecl     MSVCRT__errno(void);
 char* __cdecl    MSVCRT_getenv(const char*);
+MSVCRT_size_t __cdecl MSVCRT__fread_nolock(void*,MSVCRT_size_t,MSVCRT_size_t,MSVCRT_FILE*);
+MSVCRT_size_t __cdecl MSVCRT__fwrite_nolock(const void*,MSVCRT_size_t,MSVCRT_size_t,MSVCRT_FILE*);
 int __cdecl      MSVCRT_fclose(MSVCRT_FILE*);
+int __cdecl      MSVCRT__fclose_nolock(MSVCRT_FILE*);
 void __cdecl     MSVCRT_terminate(void);
 MSVCRT_FILE* __cdecl MSVCRT__iob_func(void);
 MSVCRT_clock_t __cdecl MSVCRT_clock(void);

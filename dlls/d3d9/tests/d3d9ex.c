@@ -23,19 +23,21 @@
 
 #define COBJMACROS
 #include "wine/test.h"
-#include "winuser.h"
-#include "wingdi.h"
 #include <initguid.h>
 #include <d3d9.h>
 
 static HMODULE d3d9_handle = 0;
-
-static BOOL (WINAPI *pEnumDisplaySettingsExA)(const char *device_name,
-        DWORD mode_idx, DEVMODEA *mode, DWORD flags);
-static LONG (WINAPI *pChangeDisplaySettingsExA)(const char *device_name,
-        DEVMODEA *mode, HWND window, DWORD flags, void *param);
+static DEVMODEW startup_mode;
 
 static HRESULT (WINAPI *pDirect3DCreate9Ex)(UINT SDKVersion, IDirect3D9Ex **d3d9ex);
+
+struct device_desc
+{
+    HWND device_window;
+    unsigned int width;
+    unsigned int height;
+    BOOL windowed;
+};
 
 static HWND create_window(void)
 {
@@ -49,7 +51,25 @@ static HWND create_window(void)
             0, 0, 640, 480, 0, 0, 0, 0);
 }
 
-static IDirect3DDevice9Ex *create_device(HWND device_window, HWND focus_window, BOOL windowed)
+/* try to make sure pending X events have been processed before continuing */
+static void flush_events(void)
+{
+    MSG msg;
+    int diff = 200;
+    int min_timeout = 100;
+    DWORD time = GetTickCount() + diff;
+
+    while (diff > 0)
+    {
+        if (MsgWaitForMultipleObjects(0, NULL, FALSE, min_timeout, QS_ALLINPUT) == WAIT_TIMEOUT)
+            break;
+        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+            DispatchMessageA(&msg);
+        diff = time - GetTickCount();
+    }
+}
+
+static IDirect3DDevice9Ex *create_device(HWND focus_window, const struct device_desc *desc)
 {
     D3DPRESENT_PARAMETERS present_parameters = {0};
     IDirect3DDevice9Ex *device;
@@ -59,23 +79,31 @@ static IDirect3DDevice9Ex *create_device(HWND device_window, HWND focus_window, 
     if (FAILED(pDirect3DCreate9Ex(D3D_SDK_VERSION, &d3d9)))
         return NULL;
 
-    present_parameters.Windowed = windowed;
-    present_parameters.hDeviceWindow = device_window;
-    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
     present_parameters.BackBufferWidth = 640;
     present_parameters.BackBufferHeight = 480;
     present_parameters.BackBufferFormat = D3DFMT_A8R8G8B8;
+    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    present_parameters.hDeviceWindow = focus_window;
+    present_parameters.Windowed = TRUE;
     present_parameters.EnableAutoDepthStencil = TRUE;
     present_parameters.AutoDepthStencilFormat = D3DFMT_D24S8;
 
+    if (desc)
+    {
+        present_parameters.BackBufferWidth = desc->width;
+        present_parameters.BackBufferHeight = desc->height;
+        present_parameters.hDeviceWindow = desc->device_window;
+        present_parameters.Windowed = desc->windowed;
+    }
+
     mode.Size = sizeof(mode);
-    mode.Width = 640;
-    mode.Height = 480;
+    mode.Width = present_parameters.BackBufferWidth;
+    mode.Height = present_parameters.BackBufferHeight;
     mode.RefreshRate = 0;
     mode.Format = D3DFMT_A8R8G8B8;
     mode.ScanLineOrdering = 0;
 
-    m = windowed ? NULL : &mode;
+    m = present_parameters.Windowed ? NULL : &mode;
     if (SUCCEEDED(IDirect3D9Ex_CreateDeviceEx(d3d9, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, focus_window,
             D3DCREATE_HARDWARE_VERTEXPROCESSING, &present_parameters, m, &device))) goto done;
 
@@ -333,7 +361,7 @@ static void test_swapchain_get_displaymode_ex(void)
 
     window = CreateWindowA("static", "d3d9_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
-    if (!(device = create_device(window, window, TRUE)))
+    if (!(device = create_device(window, NULL)))
     {
         skip("Failed to create a D3D device, skipping swapchain GetDisplayModeEx tests.\n");
         goto out;
@@ -420,8 +448,7 @@ static void test_get_adapter_displaymode_ex(void)
     D3DDISPLAYMODE mode;
     D3DDISPLAYMODEEX mode_ex;
     D3DDISPLAYROTATION rotation;
-    HANDLE hdll;
-    DEVMODEA startmode;
+    DEVMODEW startmode;
     LONG retval;
 
     hr = pDirect3DCreate9Ex(D3D_SDK_VERSION, &d3d9ex);
@@ -447,22 +474,16 @@ static void test_get_adapter_displaymode_ex(void)
        hr);
     ok(d3d9 != NULL && d3d9 != (void *) 0xdeadbeef,
        "QueryInterface returned interface %p, expected != NULL && != 0xdeadbeef\n", d3d9);
-    /* change displayorientation*/
-    hdll = GetModuleHandleA("user32.dll");
-    pEnumDisplaySettingsExA = (void*)GetProcAddress(hdll, "EnumDisplaySettingsExA");
-    pChangeDisplaySettingsExA = (void*)GetProcAddress(hdll, "ChangeDisplaySettingsExA");
-
-    if (!pEnumDisplaySettingsExA || !pChangeDisplaySettingsExA) goto out;
 
     memset(&startmode, 0, sizeof(startmode));
     startmode.dmSize = sizeof(startmode);
-    retval = pEnumDisplaySettingsExA(NULL, ENUM_CURRENT_SETTINGS, &startmode, 0);
+    retval = EnumDisplaySettingsExW(NULL, ENUM_CURRENT_SETTINGS, &startmode, 0);
     ok(retval, "Failed to retrieve current display mode, retval %d.\n", retval);
     if (!retval) goto out;
 
     startmode.dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT;
     S2(U1(startmode)).dmDisplayOrientation = DMDO_180;
-    retval = pChangeDisplaySettingsExA(NULL, &startmode, NULL, 0, NULL);
+    retval = ChangeDisplaySettingsExW(NULL, &startmode, NULL, 0, NULL);
 
     if(retval == DISP_CHANGE_BADMODE)
     {
@@ -474,7 +495,7 @@ static void test_get_adapter_displaymode_ex(void)
     /* try retrieve orientation info with EnumDisplaySettingsEx*/
     startmode.dmFields = 0;
     S2(U1(startmode)).dmDisplayOrientation = 0;
-    ok(pEnumDisplaySettingsExA(NULL, ENUM_CURRENT_SETTINGS, &startmode, EDS_ROTATEDMODE), "EnumDisplaySettingsEx failed\n");
+    ok(EnumDisplaySettingsExW(NULL, ENUM_CURRENT_SETTINGS, &startmode, EDS_ROTATEDMODE), "EnumDisplaySettingsEx failed\n");
 
     /*now that orientation has changed start tests for GetAdapterDisplayModeEx: invalid Size*/
     memset(&mode_ex, 0, sizeof(mode_ex));
@@ -528,7 +549,7 @@ static void test_get_adapter_displaymode_ex(void)
     ok(mode_ex.ScanLineOrdering != 0, "ScanLineOrdering returned 0\n");
 
     /* return to the default mode */
-    pChangeDisplaySettingsExA(NULL, NULL, NULL, 0, NULL);
+    ChangeDisplaySettingsExW(NULL, NULL, NULL, 0, NULL);
 out:
     IDirect3D9_Release(d3d9);
     IDirect3D9Ex_Release(d3d9ex);
@@ -551,7 +572,7 @@ static void test_user_memory(void)
     D3DCAPS9 caps;
 
     window = create_window();
-    if (!(device = create_device(window, window, TRUE)))
+    if (!(device = create_device(window, NULL)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
         goto done;
@@ -681,7 +702,7 @@ static void test_reset(void)
     UINT mode_count = 0;
 
     window = create_window();
-    if (!(device = create_device(window, window, TRUE)))
+    if (!(device = create_device(window, NULL)))
     {
         skip("Failed to create a D3D device, skipping test.\n");
         DestroyWindow(window);
@@ -1049,7 +1070,7 @@ static void test_reset_resources(void)
 
     window = CreateWindowA("static", "d3d9_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
-    if (!(device = create_device(window, window, TRUE)))
+    if (!(device = create_device(window, NULL)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
         goto done;
@@ -1115,7 +1136,7 @@ static void test_vidmem_accounting(void)
 
     window = CreateWindowA("static", "d3d9_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
-    if (!(device = create_device(window, window, TRUE)))
+    if (!(device = create_device(window, NULL)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
         goto done;
@@ -1162,7 +1183,7 @@ static void test_user_memory_getdc(void)
 
     window = CreateWindowA("static", "d3d9_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, 0, 0, 0, 0);
-    if (!(device = create_device(window, window, TRUE)))
+    if (!(device = create_device(window, NULL)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
         goto done;
@@ -1194,6 +1215,998 @@ done:
     DestroyWindow(window);
 }
 
+static void test_lost_device(void)
+{
+    IDirect3DDevice9Ex *device;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+    BOOL ret;
+    struct device_desc desc;
+
+    window = CreateWindowA("static", "d3d9_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    desc.device_window = window;
+    desc.width = 640;
+    desc.height = 480;
+    desc.windowed = FALSE;
+    if (!(device = create_device(window, &desc)))
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
+
+    hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_PresentEx(device, NULL, NULL, NULL, NULL, 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, window);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, NULL);
+    ok(hr == S_PRESENT_OCCLUDED, "Got unexpected hr %#x.\n", hr);
+
+    ret = SetForegroundWindow(GetDesktopWindow());
+    ok(ret, "Failed to set foreground window.\n");
+    hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == S_PRESENT_OCCLUDED, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_PresentEx(device, NULL, NULL, NULL, NULL, 0);
+    ok(hr == S_PRESENT_OCCLUDED, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, window);
+    ok(hr == S_PRESENT_OCCLUDED, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, NULL);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    ret = SetForegroundWindow(window);
+    ok(ret, "Failed to set foreground window.\n");
+    hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_PresentEx(device, NULL, NULL, NULL, NULL, 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, window);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, NULL);
+    ok(hr == S_PRESENT_OCCLUDED, "Got unexpected hr %#x.\n", hr);
+
+    hr = reset_device(device, window, FALSE);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_PresentEx(device, NULL, NULL, NULL, NULL, 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, window);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, NULL);
+    ok(hr == S_PRESENT_OCCLUDED, "Got unexpected hr %#x.\n", hr);
+
+    hr = reset_device(device, window, TRUE);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_Present(device, NULL, NULL, NULL, NULL);
+    todo_wine ok(hr == S_PRESENT_MODE_CHANGED, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_PresentEx(device, NULL, NULL, NULL, NULL, 0);
+    todo_wine ok(hr == S_PRESENT_MODE_CHANGED, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, window);
+    todo_wine ok(hr == S_PRESENT_MODE_CHANGED, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, NULL);
+    todo_wine ok(hr == S_PRESENT_MODE_CHANGED, "Got unexpected hr %#x.\n", hr);
+
+    hr = reset_device(device, window, TRUE);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_PresentEx(device, NULL, NULL, NULL, NULL, 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, window);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, NULL);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    ret = SetForegroundWindow(GetDesktopWindow());
+    ok(ret, "Failed to set foreground window.\n");
+    hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_PresentEx(device, NULL, NULL, NULL, NULL, 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, window);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, NULL);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    ret = SetForegroundWindow(window);
+    ok(ret, "Failed to set foreground window.\n");
+    hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_PresentEx(device, NULL, NULL, NULL, NULL, 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, window);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, NULL);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+
+    hr = reset_device(device, window, FALSE);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_PresentEx(device, NULL, NULL, NULL, NULL, 0);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, window);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CheckDeviceState(device, NULL);
+    ok(hr == S_PRESENT_OCCLUDED, "Got unexpected hr %#x.\n", hr);
+
+    refcount = IDirect3DDevice9Ex_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+done:
+    DestroyWindow(window);
+}
+
+static void test_unsupported_shaders(void)
+{
+    static const DWORD simple_vs[] =
+    {
+        0xfffe0101,                             /* vs_1_1               */
+        0x0000001f, 0x80000000, 0x900f0000,     /* dcl_position0 v0     */
+        0x00000001, 0xc00f0000, 0x90e40000,     /* mov oPos, v0         */
+        0x0000ffff,                             /* end                  */
+    };
+    static const DWORD simple_ps[] =
+    {
+        0xffff0101,                             /* ps_1_1               */
+        0x00000001, 0x800f0000, 0x90e40000,     /* mul r0, t0, r0       */
+        0x0000ffff,                             /* end                  */
+    };
+    static const DWORD vs_3_0[] =
+    {
+        0xfffe0300,                             /* vs_3_0               */
+        0x0200001f, 0x80000000, 0x900f0000,     /* dcl_position v0      */
+        0x0200001f, 0x80000000, 0xe00f0000,     /* dcl_position o0      */
+        0x02000001, 0xe00f0000, 0x90e40000,     /* mov o0, v0           */
+        0x0000ffff,                             /* end                  */
+    };
+
+#if 0
+    float4 main(const float4 color : COLOR) : SV_TARGET
+    {
+        float4 o;
+
+        o = color;
+
+        return o;
+    }
+#endif
+    static const DWORD ps_4_0[] =
+    {
+        0x43425844, 0x4da9446f, 0xfbe1f259, 0x3fdb3009, 0x517521fa, 0x00000001, 0x000001ac, 0x00000005,
+        0x00000034, 0x0000008c, 0x000000bc, 0x000000f0, 0x00000130, 0x46454452, 0x00000050, 0x00000000,
+        0x00000000, 0x00000000, 0x0000001c, 0xffff0400, 0x00000100, 0x0000001c, 0x7263694d, 0x666f736f,
+        0x52282074, 0x4c482029, 0x53204c53, 0x65646168, 0x6f432072, 0x6c69706d, 0x39207265, 0x2e39322e,
+        0x2e323539, 0x31313133, 0xababab00, 0x4e475349, 0x00000028, 0x00000001, 0x00000008, 0x00000020,
+        0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x00000f0f, 0x4f4c4f43, 0xabab0052, 0x4e47534f,
+        0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003, 0x00000000,
+        0x0000000f, 0x545f5653, 0x45475241, 0xabab0054, 0x52444853, 0x00000038, 0x00000040, 0x0000000e,
+        0x03001062, 0x001010f2, 0x00000000, 0x03000065, 0x001020f2, 0x00000000, 0x05000036, 0x001020f2,
+        0x00000000, 0x00101e46, 0x00000000, 0x0100003e, 0x54415453, 0x00000074, 0x00000002, 0x00000000,
+        0x00000000, 0x00000002, 0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000,
+    };
+#if 0
+    vs_1_1
+    dcl_position v0
+    def c255, 1.0, 1.0, 1.0, 1.0
+    add r0, v0, c255
+    mov oPos, r0
+#endif
+    static const DWORD vs_1_255[] =
+    {
+        0xfffe0101,
+        0x0000001f, 0x80000000, 0x900f0000,
+        0x00000051, 0xa00f00ff, 0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000,
+        0x00000002, 0x800f0000, 0x90e40000, 0xa0e400ff,
+        0x00000001, 0xc00f0000, 0x80e40000,
+        0x0000ffff
+    };
+#if 0
+    vs_1_1
+    dcl_position v0
+    def c256, 1.0, 1.0, 1.0, 1.0
+    add r0, v0, c256
+    mov oPos, r0
+#endif
+    static const DWORD vs_1_256[] =
+    {
+        0xfffe0101,
+        0x0000001f, 0x80000000, 0x900f0000,
+        0x00000051, 0xa00f0100, 0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000,
+        0x00000002, 0x800f0000, 0x90e40000, 0xa0e40100,
+        0x00000001, 0xc00f0000, 0x80e40000,
+        0x0000ffff
+    };
+#if 0
+    vs_3_0
+    dcl_position v0
+    dcl_position o0
+    def c256, 1.0, 1.0, 1.0, 1.0
+    add r0, v0, c256
+    mov o0, r0
+#endif
+    static const DWORD vs_3_256[] =
+    {
+        0xfffe0300,
+        0x0200001f, 0x80000000, 0x900f0000,
+        0x0200001f, 0x80000000, 0xe00f0000,
+        0x05000051, 0xa00f0100, 0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000,
+        0x03000002, 0x800f0000, 0x90e40000, 0xa0e40100,
+        0x02000001, 0xe00f0000, 0x80e40000,
+        0x0000ffff
+    };
+#if 0
+    /* This shader source generates syntax errors with the native shader assembler
+     * due to the constant register index values.
+     * The bytecode was modified by hand to use the intended values. */
+    vs_3_0
+    dcl_position v0
+    dcl_position o0
+    defi i16, 1, 1, 1, 1
+    rep i16
+    add r0, r0, v0
+    endrep
+    mov o0, r0
+#endif
+    static const DWORD vs_3_i16[] =
+    {
+        0xfffe0300,
+        0x0200001f, 0x80000000, 0x900f0000,
+        0x0200001f, 0x80000000, 0xe00f0000,
+        0x05000030, 0xf00f0010, 0x00000001, 0x00000001, 0x00000001, 0x00000001,
+        0x01000026, 0xf0e40010,
+        0x03000002, 0x800f0000, 0x80e40000, 0x90e40000,
+        0x00000027,
+        0x02000001, 0xe00f0000, 0x80e40000,
+        0x0000ffff
+    };
+#if 0
+    /* This shader source generates syntax errors with the native shader assembler
+     * due to the constant register index values.
+     * The bytecode was modified by hand to use the intended values. */
+    vs_3_0
+    dcl_position v0
+    dcl_position o0
+    defb b16, true
+    mov r0, v0
+    if b16
+    add r0, r0, v0
+    endif
+    mov o0, r0
+#endif
+    static const DWORD vs_3_b16[] =
+    {
+        0xfffe0300,
+        0x0200001f, 0x80000000, 0x900f0000,
+        0x0200001f, 0x80000000, 0xe00f0000,
+        0x0200002f, 0xe00f0810, 0x00000001,
+        0x02000001, 0x800f0000, 0x90e40000,
+        0x01000028, 0xe0e40810,
+        0x03000002, 0x800f0000, 0x80e40000, 0x90e40000,
+        0x0000002b,
+        0x02000001, 0xe00f0000, 0x80e40000,
+        0x0000ffff
+    };
+#if 0
+    /* This shader source generates syntax errors with the native shader assembler
+     * due to the constant register index values.
+     * The bytecode was modified by hand to use the intended values. */
+    ps_1_1
+    def c8, 1.0, 1.0, 1.0, 1.0
+    add r0, v0, c8
+#endif
+    static const DWORD ps_1_8[] =
+    {
+        0xffff0101,
+        0x00000051, 0xa00f0008, 0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000,
+        0x00000002, 0x800f0000, 0x90e40000, 0xa0e40008,
+        0x0000ffff
+    };
+#if 0
+    /* This shader source generates syntax errors with the native shader assembler
+     * due to the constant register index values.
+     * The bytecode was modified by hand to use the intended values. */
+    ps_2_0
+    def c32, 1.0, 1.0, 1.0, 1.0
+    add oC0, v0, c32
+#endif
+    static const DWORD ps_2_32[] =
+    {
+        0xffff0200,
+        0x05000051, 0xa00f0020, 0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000,
+        0x03000002, 0x800f0000, 0x90e40000, 0xa0e40020,
+        0x0000ffff
+    };
+#if 0
+    /* This shader source generates syntax errors with the native shader assembler
+     * due to the constant register index values.
+     * The bytecode was modified by hand to use the intended values. */
+    ps_3_0
+    dcl_color0 v0
+    def c224, 1.0, 1.0, 1.0, 1.0
+    add oC0, v0, c224
+#endif
+    static const DWORD ps_3_224[] =
+    {
+        0xffff0300,
+        0x0200001f, 0x8000000a, 0x900f0000,
+        0x05000051, 0xa00f00e0, 0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000,
+        0x03000002, 0x800f0800, 0x90e40000, 0xa0e400e0,
+        0x0000ffff
+    };
+#if 0
+    /* This shader source generates syntax errors with the native shader assembler
+     * due to the constant register index values.
+     * The bytecode was modified by hand to use the intended values. */
+    ps_2_0
+    defb b0, true
+    defi i0, 1, 1, 1, 1
+    rep i0
+    if b0
+    add r0, r0, v0
+    endif
+    endrep
+    mov oC0, r0
+#endif
+    static const DWORD ps_2_0_boolint[] =
+    {
+        0xffff0200,
+        0x0200002f, 0xe00f0800, 0x00000001,
+        0x05000030, 0xf00f0000, 0x00000001, 0x00000001, 0x00000001, 0x00000001,
+        0x01000026, 0xf0e40000,
+        0x01000028, 0xe0e40800,
+        0x03000002, 0x800f0000, 0x80e40000, 0x90e40000,
+        0x0000002b,
+        0x00000027,
+        0x02000001, 0x800f0800, 0x80e40000,
+        0x0000ffff
+    };
+
+    IDirect3DVertexShader9 *vs = NULL;
+    IDirect3DPixelShader9 *ps = NULL;
+    IDirect3DDevice9Ex *device;
+    ULONG refcount;
+    D3DCAPS9 caps;
+    HWND window;
+    HRESULT hr;
+
+    window = CreateWindowA("d3d9_test_wc", "d3d9_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+    if (!(device = create_device(window, NULL)))
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        DestroyWindow(window);
+        return;
+    }
+
+    hr = IDirect3DDevice9Ex_CreateVertexShader(device, simple_ps, &vs);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CreatePixelShader(device, simple_vs, &ps);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CreatePixelShader(device, ps_4_0, &ps);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9Ex_GetDeviceCaps(device, &caps);
+    ok(SUCCEEDED(hr), "Failed to get device caps, hr %#x.\n", hr);
+
+    if (caps.VertexShaderVersion < D3DVS_VERSION(3, 0))
+    {
+        hr = IDirect3DDevice9Ex_CreateVertexShader(device, vs_3_0, &vs);
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+        if (caps.VertexShaderVersion <= D3DVS_VERSION(1, 1) && caps.MaxVertexShaderConst < 256)
+        {
+            hr = IDirect3DDevice9Ex_CreateVertexShader(device, vs_1_255, &vs);
+            ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+        }
+        else
+        {
+            skip("GPU supports SM2+, skipping SM1 test.\n");
+        }
+
+        skip("This GPU doesn't support SM3, skipping test with shader using unsupported constants.\n");
+    }
+    else
+    {
+        skip("This GPU supports SM3, skipping unsupported shader test.\n");
+
+        hr = IDirect3DDevice9Ex_CreateVertexShader(device, vs_1_255, &vs);
+        ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+        IDirect3DVertexShader9_Release(vs);
+        hr = IDirect3DDevice9Ex_CreateVertexShader(device, vs_1_256, &vs);
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+        hr = IDirect3DDevice9Ex_CreateVertexShader(device, vs_3_256, &vs);
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+        hr = IDirect3DDevice9Ex_CreateVertexShader(device, vs_3_i16, &vs);
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+        hr = IDirect3DDevice9Ex_CreateVertexShader(device, vs_3_b16, &vs);
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    }
+
+    if (caps.PixelShaderVersion < D3DPS_VERSION(3, 0))
+    {
+        skip("This GPU doesn't support SM3, skipping test with shader using unsupported constants.\n");
+        goto cleanup;
+    }
+    hr = IDirect3DDevice9Ex_CreatePixelShader(device, ps_1_8, &ps);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CreatePixelShader(device, ps_2_32, &ps);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CreatePixelShader(device, ps_3_224, &ps);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CreatePixelShader(device, ps_2_0_boolint, &ps);
+    todo_wine ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    if (ps)
+        IDirect3DPixelShader9_Release(ps);
+
+cleanup:
+    refcount = IDirect3DDevice9Ex_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    DestroyWindow(window);
+}
+
+static HWND filter_messages;
+
+enum message_window
+{
+    DEVICE_WINDOW,
+    FOCUS_WINDOW,
+};
+
+struct message
+{
+    UINT message;
+    enum message_window window;
+};
+
+static const struct message *expect_messages;
+static HWND device_window, focus_window;
+
+struct wndproc_thread_param
+{
+    HWND dummy_window;
+    HANDLE window_created;
+    HANDLE test_finished;
+    BOOL running_in_foreground;
+};
+
+static LRESULT CALLBACK test_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
+{
+    if (filter_messages && filter_messages == hwnd)
+    {
+        if (message != WM_DISPLAYCHANGE && message != WM_IME_NOTIFY)
+            todo_wine ok(0, "Received unexpected message %#x for window %p.\n", message, hwnd);
+    }
+
+    if (expect_messages)
+    {
+        HWND w;
+
+        switch (expect_messages->window)
+        {
+            case DEVICE_WINDOW:
+                w = device_window;
+                break;
+
+            case FOCUS_WINDOW:
+                w = focus_window;
+                break;
+
+            default:
+                w = NULL;
+                break;
+        };
+
+        if (hwnd == w && expect_messages->message == message)
+            ++expect_messages;
+    }
+
+    return DefWindowProcA(hwnd, message, wparam, lparam);
+}
+
+static DWORD WINAPI wndproc_thread(void *param)
+{
+    struct wndproc_thread_param *p = param;
+    DWORD res;
+    BOOL ret;
+
+    p->dummy_window = CreateWindowA("d3d9_test_wndproc_wc", "d3d9_test",
+            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, startup_mode.dmPelsWidth,
+            startup_mode.dmPelsHeight, 0, 0, 0, 0);
+    p->running_in_foreground = SetForegroundWindow(p->dummy_window);
+
+    ret = SetEvent(p->window_created);
+    ok(ret, "SetEvent failed, last error %#x.\n", GetLastError());
+
+    for (;;)
+    {
+        MSG msg;
+
+        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+            DispatchMessageA(&msg);
+        res = WaitForSingleObject(p->test_finished, 100);
+        if (res == WAIT_OBJECT_0)
+            break;
+        if (res != WAIT_TIMEOUT)
+        {
+            ok(0, "Wait failed (%#x), last error %#x.\n", res, GetLastError());
+            break;
+        }
+    }
+
+    DestroyWindow(p->dummy_window);
+
+    return 0;
+}
+
+static void test_wndproc(void)
+{
+    struct wndproc_thread_param thread_params;
+    struct device_desc device_desc;
+    IDirect3DDevice9Ex *device;
+    WNDCLASSA wc = {0};
+    HANDLE thread;
+    LONG_PTR proc;
+    ULONG ref;
+    DWORD res, tid;
+    HWND tmp;
+
+    static const struct message messages[] =
+    {
+        {WM_WINDOWPOSCHANGING,  FOCUS_WINDOW},
+        {WM_ACTIVATE,           FOCUS_WINDOW},
+        {WM_SETFOCUS,           FOCUS_WINDOW},
+        {0,                     0},
+    };
+
+    wc.lpfnWndProc = test_proc;
+    wc.lpszClassName = "d3d9_test_wndproc_wc";
+    ok(RegisterClassA(&wc), "Failed to register window class.\n");
+
+    thread_params.window_created = CreateEventA(NULL, FALSE, FALSE, NULL);
+    ok(!!thread_params.window_created, "CreateEvent failed, last error %#x.\n", GetLastError());
+    thread_params.test_finished = CreateEventA(NULL, FALSE, FALSE, NULL);
+    ok(!!thread_params.test_finished, "CreateEvent failed, last error %#x.\n", GetLastError());
+
+    focus_window = CreateWindowA("d3d9_test_wndproc_wc", "d3d9_test",
+            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, startup_mode.dmPelsWidth,
+            startup_mode.dmPelsHeight, 0, 0, 0, 0);
+    device_window = CreateWindowA("d3d9_test_wndproc_wc", "d3d9_test",
+            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, startup_mode.dmPelsWidth,
+            startup_mode.dmPelsHeight, 0, 0, 0, 0);
+    thread = CreateThread(NULL, 0, wndproc_thread, &thread_params, 0, &tid);
+    ok(!!thread, "Failed to create thread, last error %#x.\n", GetLastError());
+
+    res = WaitForSingleObject(thread_params.window_created, INFINITE);
+    ok(res == WAIT_OBJECT_0, "Wait failed (%#x), last error %#x.\n", res, GetLastError());
+
+    proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    trace("device_window %p, focus_window %p, dummy_window %p.\n",
+            device_window, focus_window, thread_params.dummy_window);
+
+    tmp = GetFocus();
+    ok(tmp == device_window, "Expected focus %p, got %p.\n", device_window, tmp);
+    if (thread_params.running_in_foreground)
+    {
+        tmp = GetForegroundWindow();
+        ok(tmp == thread_params.dummy_window, "Expected foreground window %p, got %p.\n",
+                thread_params.dummy_window, tmp);
+    }
+    else
+        skip("Not running in foreground, skip foreground window test\n");
+
+    flush_events();
+
+    expect_messages = messages;
+
+    device_desc.device_window = device_window;
+    device_desc.width = startup_mode.dmPelsWidth;
+    device_desc.height = startup_mode.dmPelsHeight;
+    device_desc.windowed = FALSE;
+    if (!(device = create_device(focus_window, &device_desc)))
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
+
+    ok(!expect_messages->message, "Expected message %#x for window %#x, but didn't receive it.\n",
+            expect_messages->message, expect_messages->window);
+    expect_messages = NULL;
+
+    if (0) /* Disabled until we can make this work in a reliable way on Wine. */
+    {
+        tmp = GetFocus();
+        ok(tmp == focus_window, "Expected focus %p, got %p.\n", focus_window, tmp);
+        tmp = GetForegroundWindow();
+        ok(tmp == focus_window, "Expected foreground window %p, got %p.\n", focus_window, tmp);
+    }
+    SetForegroundWindow(focus_window);
+    flush_events();
+
+    filter_messages = focus_window;
+
+    proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    ref = IDirect3DDevice9Ex_Release(device);
+    ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);
+
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    device_desc.device_window = focus_window;
+    if (!(device = create_device(focus_window, &device_desc)))
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
+
+    ref = IDirect3DDevice9Ex_Release(device);
+    ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);
+
+    device_desc.device_window = device_window;
+    if (!(device = create_device(focus_window, &device_desc)))
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
+
+    proc = SetWindowLongPtrA(focus_window, GWLP_WNDPROC, (LONG_PTR)DefWindowProcA);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    ref = IDirect3DDevice9Ex_Release(device);
+    ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);
+
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)DefWindowProcA, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)DefWindowProcA, proc);
+
+done:
+    filter_messages = NULL;
+
+    SetEvent(thread_params.test_finished);
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread_params.test_finished);
+    CloseHandle(thread_params.window_created);
+    CloseHandle(thread);
+
+    DestroyWindow(device_window);
+    DestroyWindow(focus_window);
+    UnregisterClassA("d3d9_test_wndproc_wc", GetModuleHandleA(NULL));
+}
+
+static void test_wndproc_windowed(void)
+{
+    struct wndproc_thread_param thread_params;
+    struct device_desc device_desc;
+    IDirect3DDevice9Ex *device;
+    WNDCLASSA wc = {0};
+    HANDLE thread;
+    LONG_PTR proc;
+    HRESULT hr;
+    ULONG ref;
+    DWORD res, tid;
+    HWND tmp;
+
+    wc.lpfnWndProc = test_proc;
+    wc.lpszClassName = "d3d9_test_wndproc_wc";
+    ok(RegisterClassA(&wc), "Failed to register window class.\n");
+
+    thread_params.window_created = CreateEventA(NULL, FALSE, FALSE, NULL);
+    ok(!!thread_params.window_created, "CreateEvent failed, last error %#x.\n", GetLastError());
+    thread_params.test_finished = CreateEventA(NULL, FALSE, FALSE, NULL);
+    ok(!!thread_params.test_finished, "CreateEvent failed, last error %#x.\n", GetLastError());
+
+    focus_window = CreateWindowA("d3d9_test_wndproc_wc", "d3d9_test",
+            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, startup_mode.dmPelsWidth,
+            startup_mode.dmPelsHeight, 0, 0, 0, 0);
+    device_window = CreateWindowA("d3d9_test_wndproc_wc", "d3d9_test",
+            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, startup_mode.dmPelsWidth,
+            startup_mode.dmPelsHeight, 0, 0, 0, 0);
+    thread = CreateThread(NULL, 0, wndproc_thread, &thread_params, 0, &tid);
+    ok(!!thread, "Failed to create thread, last error %#x.\n", GetLastError());
+
+    res = WaitForSingleObject(thread_params.window_created, INFINITE);
+    ok(res == WAIT_OBJECT_0, "Wait failed (%#x), last error %#x.\n", res, GetLastError());
+
+    proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    trace("device_window %p, focus_window %p, dummy_window %p.\n",
+            device_window, focus_window, thread_params.dummy_window);
+
+    tmp = GetFocus();
+    ok(tmp == device_window, "Expected focus %p, got %p.\n", device_window, tmp);
+    if (thread_params.running_in_foreground)
+    {
+        tmp = GetForegroundWindow();
+        ok(tmp == thread_params.dummy_window, "Expected foreground window %p, got %p.\n",
+                thread_params.dummy_window, tmp);
+    }
+    else
+        skip("Not running in foreground, skip foreground window test\n");
+
+    filter_messages = focus_window;
+
+    device_desc.device_window = device_window;
+    device_desc.width = 640;
+    device_desc.height = 480;
+    device_desc.windowed = TRUE;
+    if (!(device = create_device(focus_window, &device_desc)))
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
+
+    tmp = GetFocus();
+    ok(tmp == device_window, "Expected focus %p, got %p.\n", device_window, tmp);
+    tmp = GetForegroundWindow();
+    ok(tmp == thread_params.dummy_window, "Expected foreground window %p, got %p.\n",
+            thread_params.dummy_window, tmp);
+
+    proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    filter_messages = NULL;
+
+    hr = reset_device(device, device_window, FALSE);
+    ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
+
+    proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    hr = reset_device(device, device_window, TRUE);
+    ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
+
+    proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    filter_messages = focus_window;
+
+    ref = IDirect3DDevice9Ex_Release(device);
+    ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);
+
+    filter_messages = device_window;
+
+    device_desc.device_window = focus_window;
+    if (!(device = create_device(focus_window, &device_desc)))
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
+
+    filter_messages = NULL;
+
+    hr = reset_device(device, focus_window, FALSE);
+    ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
+
+    proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    hr = reset_device(device, focus_window, TRUE);
+    ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
+
+    proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    filter_messages = device_window;
+
+    ref = IDirect3DDevice9Ex_Release(device);
+    ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);
+
+    device_desc.device_window = device_window;
+    if (!(device = create_device(focus_window, &device_desc)))
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
+
+    filter_messages = NULL;
+
+    hr = reset_device(device, device_window, FALSE);
+    ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
+
+    proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    hr = reset_device(device, device_window, TRUE);
+    ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
+
+    proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    filter_messages = device_window;
+
+    ref = IDirect3DDevice9Ex_Release(device);
+    ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);
+
+done:
+    filter_messages = NULL;
+
+    SetEvent(thread_params.test_finished);
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(thread_params.test_finished);
+    CloseHandle(thread_params.window_created);
+    CloseHandle(thread);
+
+    DestroyWindow(device_window);
+    DestroyWindow(focus_window);
+    UnregisterClassA("d3d9_test_wndproc_wc", GetModuleHandleA(NULL));
+}
+
+static void test_window_style(void)
+{
+    RECT focus_rect, fullscreen_rect, r;
+    LONG device_style, device_exstyle;
+    LONG focus_style, focus_exstyle;
+    struct device_desc device_desc;
+    LONG style;
+    IDirect3DDevice9Ex *device;
+    HRESULT hr;
+    ULONG ref;
+    static const LONG test_style_flags[] =
+    {
+        0,
+        WS_VISIBLE
+    };
+    unsigned int i;
+
+    SetRect(&fullscreen_rect, 0, 0, startup_mode.dmPelsWidth, startup_mode.dmPelsHeight);
+
+    for (i = 0; i < sizeof(test_style_flags) / sizeof(*test_style_flags); ++i)
+    {
+        focus_window = CreateWindowA("d3d9_test_wc", "d3d9_test", WS_OVERLAPPEDWINDOW | test_style_flags[i],
+                0, 0, startup_mode.dmPelsWidth / 2, startup_mode.dmPelsHeight / 2, 0, 0, 0, 0);
+        device_window = CreateWindowA("d3d9_test_wc", "d3d9_test", WS_OVERLAPPEDWINDOW | test_style_flags[i],
+                0, 0, startup_mode.dmPelsWidth / 2, startup_mode.dmPelsHeight / 2, 0, 0, 0, 0);
+
+        device_style = GetWindowLongA(device_window, GWL_STYLE);
+        device_exstyle = GetWindowLongA(device_window, GWL_EXSTYLE);
+        focus_style = GetWindowLongA(focus_window, GWL_STYLE);
+        focus_exstyle = GetWindowLongA(focus_window, GWL_EXSTYLE);
+
+        GetWindowRect(focus_window, &focus_rect);
+
+        device_desc.device_window = device_window;
+        device_desc.width = startup_mode.dmPelsWidth;
+        device_desc.height = startup_mode.dmPelsHeight;
+        device_desc.windowed = FALSE;
+        if (!(device = create_device(focus_window, &device_desc)))
+        {
+            skip("Failed to create a D3D device, skipping tests.\n");
+            DestroyWindow(device_window);
+            DestroyWindow(focus_window);
+            return;
+        }
+
+        style = GetWindowLongA(device_window, GWL_STYLE);
+        todo_wine ok(style == device_style, "Expected device window style %#x, got %#x.\n",
+                device_style, style);
+        style = GetWindowLongA(device_window, GWL_EXSTYLE);
+        todo_wine ok(style == device_exstyle, "Expected device window extended style %#x, got %#x.\n",
+                device_exstyle, style);
+
+        style = GetWindowLongA(focus_window, GWL_STYLE);
+        ok(style == focus_style, "Expected focus window style %#x, got %#x.\n",
+                focus_style, style);
+        style = GetWindowLongA(focus_window, GWL_EXSTYLE);
+        ok(style == focus_exstyle, "Expected focus window extended style %#x, got %#x.\n",
+                focus_exstyle, style);
+
+        GetWindowRect(device_window, &r);
+        ok(EqualRect(&r, &fullscreen_rect), "Expected {%d, %d, %d, %d}, got {%d, %d, %d, %d}.\n",
+                fullscreen_rect.left, fullscreen_rect.top, fullscreen_rect.right, fullscreen_rect.bottom,
+                r.left, r.top, r.right, r.bottom);
+        GetClientRect(device_window, &r);
+        todo_wine ok(!EqualRect(&r, &fullscreen_rect), "Client rect and window rect are equal.\n");
+        GetWindowRect(focus_window, &r);
+        ok(EqualRect(&r, &focus_rect), "Expected {%d, %d, %d, %d}, got {%d, %d, %d, %d}.\n",
+                focus_rect.left, focus_rect.top, focus_rect.right, focus_rect.bottom,
+                r.left, r.top, r.right, r.bottom);
+
+        hr = reset_device(device, device_window, TRUE);
+        ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
+
+        style = GetWindowLongA(device_window, GWL_STYLE);
+        if (test_style_flags[i] & WS_VISIBLE)
+            ok(style == device_style, "Expected device window style %#x, got %#x.\n",
+                    device_style, style);
+        else
+            todo_wine ok(style == device_style, "Expected device window style %#x, got %#x.\n",
+                    device_style, style);
+        style = GetWindowLongA(device_window, GWL_EXSTYLE);
+        todo_wine ok(style == device_exstyle, "Expected device window extended style %#x, got %#x.\n",
+                device_exstyle, style);
+
+        style = GetWindowLongA(focus_window, GWL_STYLE);
+        ok(style == focus_style, "Expected focus window style %#x, got %#x.\n",
+                focus_style, style);
+        style = GetWindowLongA(focus_window, GWL_EXSTYLE);
+        ok(style == focus_exstyle, "Expected focus window extended style %#x, got %#x.\n",
+                focus_exstyle, style);
+
+        ref = IDirect3DDevice9Ex_Release(device);
+        ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);
+
+        DestroyWindow(device_window);
+        DestroyWindow(focus_window);
+    }
+}
+
 START_TEST(d3d9ex)
 {
     d3d9_handle = LoadLibraryA("d3d9.dll");
@@ -1209,6 +2222,10 @@ START_TEST(d3d9ex)
         return;
     }
 
+    startup_mode.dmSize = sizeof(startup_mode);
+    ok(EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &startup_mode),
+            "Failed to get display mode.\n");
+
     test_qi_base_to_ex();
     test_qi_ex_to_base();
     test_swapchain_get_displaymode_ex();
@@ -1219,4 +2236,9 @@ START_TEST(d3d9ex)
     test_reset_resources();
     test_vidmem_accounting();
     test_user_memory_getdc();
+    test_lost_device();
+    test_unsupported_shaders();
+    test_wndproc();
+    test_wndproc_windowed();
+    test_window_style();
 }

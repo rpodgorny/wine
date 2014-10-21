@@ -185,7 +185,7 @@ DWORD WINAPI WaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
         }
     }
 
-    status = NtWaitForMultipleObjects( count, hloc, wait_all, alertable,
+    status = NtWaitForMultipleObjects( count, hloc, !wait_all, alertable,
                                        get_nt_timeout( &time, timeout ) );
 
     if (HIWORD(status))  /* is it an error code? */
@@ -458,7 +458,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateEventExA( SECURITY_ATTRIBUTES *sa, LPCSTR 
  */
 HANDLE WINAPI DECLSPEC_HOTPATCH CreateEventExW( SECURITY_ATTRIBUTES *sa, LPCWSTR name, DWORD flags, DWORD access )
 {
-    HANDLE ret;
+    HANDLE ret = 0;
     UNICODE_STRING nameW;
     OBJECT_ATTRIBUTES attr;
     NTSTATUS status;
@@ -632,7 +632,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateMutexExA( SECURITY_ATTRIBUTES *sa, LPCSTR 
  */
 HANDLE WINAPI DECLSPEC_HOTPATCH CreateMutexExW( SECURITY_ATTRIBUTES *sa, LPCWSTR name, DWORD flags, DWORD access )
 {
-    HANDLE ret;
+    HANDLE ret = 0;
     UNICODE_STRING nameW;
     OBJECT_ATTRIBUTES attr;
     NTSTATUS status;
@@ -777,7 +777,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateSemaphoreExA( SECURITY_ATTRIBUTES *sa, LON
 HANDLE WINAPI DECLSPEC_HOTPATCH CreateSemaphoreExW( SECURITY_ATTRIBUTES *sa, LONG initial, LONG max,
                                                     LPCWSTR name, DWORD flags, DWORD access )
 {
-    HANDLE ret;
+    HANDLE ret = 0;
     UNICODE_STRING nameW;
     OBJECT_ATTRIBUTES attr;
     NTSTATUS status;
@@ -1712,12 +1712,16 @@ BOOL WINAPI GetNamedPipeHandleStateA(
     LPDWORD lpMaxCollectionCount, LPDWORD lpCollectDataTimeout,
     LPSTR lpUsername, DWORD nUsernameMaxSize)
 {
-    FIXME("%p %p %p %p %p %p %d\n",
-          hNamedPipe, lpState, lpCurInstances,
-          lpMaxCollectionCount, lpCollectDataTimeout,
-          lpUsername, nUsernameMaxSize);
+    WARN("%p %p %p %p %p %p %d: semi-stub\n",
+         hNamedPipe, lpState, lpCurInstances,
+         lpMaxCollectionCount, lpCollectDataTimeout,
+         lpUsername, nUsernameMaxSize);
 
-    return FALSE;
+    if (lpUsername && nUsernameMaxSize)
+        *lpUsername = 0;
+
+    return GetNamedPipeHandleStateW(hNamedPipe, lpState, lpCurInstances,
+                                    lpMaxCollectionCount, lpCollectDataTimeout, NULL, 0);
 }
 
 /***********************************************************************
@@ -1728,12 +1732,53 @@ BOOL WINAPI GetNamedPipeHandleStateW(
     LPDWORD lpMaxCollectionCount, LPDWORD lpCollectDataTimeout,
     LPWSTR lpUsername, DWORD nUsernameMaxSize)
 {
-    FIXME("%p %p %p %p %p %p %d\n",
+    IO_STATUS_BLOCK iosb;
+    NTSTATUS status;
+
+    FIXME("%p %p %p %p %p %p %d: semi-stub\n",
           hNamedPipe, lpState, lpCurInstances,
           lpMaxCollectionCount, lpCollectDataTimeout,
           lpUsername, nUsernameMaxSize);
 
-    return FALSE;
+    if (lpMaxCollectionCount)
+        *lpMaxCollectionCount = 0;
+
+    if (lpCollectDataTimeout)
+        *lpCollectDataTimeout = 0;
+
+    if (lpUsername && nUsernameMaxSize)
+        *lpUsername = 0;
+
+    if (lpState)
+    {
+        FILE_PIPE_INFORMATION fpi;
+        status = NtQueryInformationFile(hNamedPipe, &iosb, &fpi, sizeof(fpi),
+                                        FilePipeInformation);
+        if (status)
+        {
+            SetLastError( RtlNtStatusToDosError(status) );
+            return FALSE;
+        }
+
+        *lpState = (fpi.ReadMode ? PIPE_READMODE_MESSAGE : PIPE_READMODE_BYTE) |
+                   (fpi.CompletionMode ? PIPE_NOWAIT : PIPE_WAIT);
+    }
+
+    if (lpCurInstances)
+    {
+        FILE_PIPE_LOCAL_INFORMATION fpli;
+        status = NtQueryInformationFile(hNamedPipe, &iosb, &fpli, sizeof(fpli),
+                                        FilePipeLocalInformation);
+        if (status)
+        {
+            SetLastError( RtlNtStatusToDosError(status) );
+            return FALSE;
+        }
+
+        *lpCurInstances = fpli.CurrentInstances;
+    }
+
+    return TRUE;
 }
 
 /***********************************************************************
@@ -1745,9 +1790,34 @@ BOOL WINAPI SetNamedPipeHandleState(
 {
     /* should be a fixme, but this function is called a lot by the RPC
      * runtime, and it slows down InstallShield a fair bit. */
-    WARN("stub: %p %p/%d %p %p\n",
+    WARN("semi-stub: %p %p/%d %p %p\n",
           hNamedPipe, lpMode, lpMode ? *lpMode : 0, lpMaxCollectionCount, lpCollectDataTimeout);
-    return FALSE;
+
+    if (lpMode)
+    {
+        FILE_PIPE_INFORMATION fpi;
+        IO_STATUS_BLOCK iosb;
+        NTSTATUS status;
+
+        if (*lpMode & ~(PIPE_READMODE_MESSAGE | PIPE_NOWAIT))
+            status = STATUS_INVALID_PARAMETER;
+        else
+        {
+            fpi.CompletionMode = (*lpMode & PIPE_NOWAIT) ?
+                FILE_PIPE_COMPLETE_OPERATION : FILE_PIPE_QUEUE_OPERATION;
+            fpi.ReadMode = (*lpMode & PIPE_READMODE_MESSAGE) ?
+                FILE_PIPE_MESSAGE_MODE : FILE_PIPE_BYTE_STREAM_MODE;
+            status = NtSetInformationFile(hNamedPipe, &iosb, &fpi, sizeof(fpi), FilePipeInformation);
+        }
+
+        if (status)
+        {
+            SetLastError( RtlNtStatusToDosError(status) );
+            return FALSE;
+        }
+    }
+
+    return TRUE;
 }
 
 /***********************************************************************
@@ -1809,15 +1879,11 @@ BOOL WINAPI CallNamedPipeW(
 
     mode = PIPE_READMODE_MESSAGE;
     ret = SetNamedPipeHandleState(pipe, &mode, NULL, NULL);
-
-    /* Currently SetNamedPipeHandleState() is a stub returning FALSE */
-    if (ret) FIXME("Now that SetNamedPipeHandleState() is more than a stub, please update CallNamedPipeW\n");
-    /*
     if (!ret)
     {
         CloseHandle(pipe);
         return FALSE;
-    }*/
+    }
 
     ret = TransactNamedPipe(pipe, lpInput, lpInputSize, lpOutput, lpOutputSize, lpBytesRead, NULL);
     CloseHandle(pipe);

@@ -71,6 +71,7 @@ static const ULONG OFFSET_PS_MTIMELOW        = 0x0000006C;
 static const ULONG OFFSET_PS_MTIMEHIGH       = 0x00000070;
 static const ULONG OFFSET_PS_STARTBLOCK	     = 0x00000074;
 static const ULONG OFFSET_PS_SIZE	     = 0x00000078;
+static const ULONG OFFSET_PS_SIZE_HIGH	     = 0x0000007C;
 static const WORD  DEF_BIG_BLOCK_SIZE_BITS   = 0x0009;
 static const WORD  MIN_BIG_BLOCK_SIZE_BITS   = 0x0009;
 static const WORD  MAX_BIG_BLOCK_SIZE_BITS   = 0x000c;
@@ -251,8 +252,8 @@ struct StorageBaseImplVtbl {
   HRESULT (*StreamLink)(StorageBaseImpl*,DirRef,DirRef);
   HRESULT (*GetTransactionSig)(StorageBaseImpl*,ULONG*,BOOL);
   HRESULT (*SetTransactionSig)(StorageBaseImpl*,ULONG);
-  HRESULT (*LockTransaction)(StorageBaseImpl*);
-  HRESULT (*UnlockTransaction)(StorageBaseImpl*);
+  HRESULT (*LockTransaction)(StorageBaseImpl*,BOOL);
+  HRESULT (*UnlockTransaction)(StorageBaseImpl*,BOOL);
 };
 
 static inline void StorageBaseImpl_Destroy(StorageBaseImpl *This)
@@ -342,14 +343,14 @@ static inline HRESULT StorageBaseImpl_SetTransactionSig(StorageBaseImpl *This,
   return This->baseVtbl->SetTransactionSig(This, value);
 }
 
-static inline HRESULT StorageBaseImpl_LockTransaction(StorageBaseImpl *This)
+static inline HRESULT StorageBaseImpl_LockTransaction(StorageBaseImpl *This, BOOL write)
 {
-  return This->baseVtbl->LockTransaction(This);
+  return This->baseVtbl->LockTransaction(This, write);
 }
 
-static inline HRESULT StorageBaseImpl_UnlockTransaction(StorageBaseImpl *This)
+static inline HRESULT StorageBaseImpl_UnlockTransaction(StorageBaseImpl *This, BOOL write)
 {
-  return This->baseVtbl->UnlockTransaction(This);
+  return This->baseVtbl->UnlockTransaction(This, write);
 }
 
 /****************************************************************************
@@ -503,7 +504,7 @@ StgStreamImpl* StgStreamImpl_Construct(
 /* Range lock constants.
  *
  * The storage format reserves the region from 0x7fffff00-0x7fffffff for
- * locking and synchronization. Unfortuantely, the spec doesn't say which bytes
+ * locking and synchronization. Unfortunately, the spec doesn't say which bytes
  * within that range are used, and for what. These are guesses based on testing.
  * In particular, ends of ranges may be wrong.
 

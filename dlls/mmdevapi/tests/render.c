@@ -651,7 +651,7 @@ static void test_event(void)
 
     /* Still receiving events! */
     r = WaitForSingleObject(event, 20);
-    todo_wine ok(r == WAIT_OBJECT_0, "Wait(event) after Stop gave %x\n", r);
+    ok(r == WAIT_OBJECT_0, "Wait(event) after Stop gave %x\n", r);
 
     hr = IAudioClient_Reset(ac);
     ok(hr == S_OK, "Reset failed: %08x\n", hr);
@@ -659,13 +659,13 @@ static void test_event(void)
     ok(ResetEvent(event), "ResetEvent\n");
 
     r = WaitForSingleObject(event, 120);
-    todo_wine ok(r == WAIT_OBJECT_0, "Wait(event) after Reset gave %x\n", r);
+    ok(r == WAIT_OBJECT_0, "Wait(event) after Reset gave %x\n", r);
 
     hr = IAudioClient_SetEventHandle(ac, NULL);
     ok(hr == E_INVALIDARG, "SetEventHandle(NULL) returns %08x\n", hr);
 
     r = WaitForSingleObject(event, 70);
-    todo_wine ok(r == WAIT_OBJECT_0, "Wait(NULL event) gave %x\n", r);
+    ok(r == WAIT_OBJECT_0, "Wait(NULL event) gave %x\n", r);
 
     /* test releasing a playing stream */
     hr = IAudioClient_Start(ac);
@@ -935,7 +935,7 @@ static void test_clock(int share)
     if (share)
     ok(gbsize == bufsize,
        "BufferSize %u at rate %u\n", gbsize, pwfx->nSamplesPerSec);
-    else todo_wine
+    else
     ok(gbsize == parts * fragment || gbsize == MulDiv(bufsize, 1, 1024) * 1024,
        "BufferSize %u misfits fragment size %u at rate %u\n", gbsize, fragment, pwfx->nSamplesPerSec);
 
@@ -955,7 +955,7 @@ static void test_clock(int share)
     trace("Clock Frequency %u\n", (UINT)freq);
 
     /* MSDN says it's arbitrary units, but shared mode is unlikely to change */
-    if (share) todo_wine
+    if (share)
         ok(freq == pwfx->nSamplesPerSec * pwfx->nBlockAlign,
            "Clock Frequency %u\n", (UINT)freq);
     else

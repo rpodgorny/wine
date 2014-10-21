@@ -172,7 +172,7 @@ static LRESULT WINAPI menu_ownerdraw_wnd_proc(HWND hwnd, UINT msg,
         case WM_MEASUREITEM:
             {
                 MEASUREITEMSTRUCT* pmis = (MEASUREITEMSTRUCT*)lparam;
-                if( winetest_debug)
+                if (winetest_debug > 1)
                     trace("WM_MEASUREITEM received data %lx size %dx%d\n",
                             pmis->itemData, pmis->itemWidth, pmis->itemHeight);
                 ok( !wparam, "wrong wparam %lx\n", wparam );
@@ -191,7 +191,7 @@ static LRESULT WINAPI menu_ownerdraw_wnd_proc(HWND hwnd, UINT msg,
                 SIZE sz;
                 int i;
                 pdis = (DRAWITEMSTRUCT *) lparam;
-                if( winetest_debug) {
+                if (winetest_debug > 1) {
                     RECT rc;
                     GetMenuItemRect( hwnd, (HMENU)pdis->hwndItem, pdis->itemData ,&rc);
                     trace("WM_DRAWITEM received hwnd %p hmenu %p itemdata %ld item %d rc %d,%d-%d,%d itemrc:  %d,%d-%d,%d\n",
@@ -1368,6 +1368,11 @@ static void test_menu_iteminfo( void )
     TMII_GMII ( MIIM_STRING|MIIM_FTYPE, 80,
         MFT_SEPARATOR, 0, 0, 0, 0, 0, 0, string, 0, 0,
         empty, OK, ER );
+    TMII_DONE
+    TMII_INSMI( MIIM_STRING|MIIM_FTYPE, MFT_STRING, -1, -1, 0, 0, 0, -1, NULL, 0, 0, OK );
+    TMII_GMII ( MIIM_STRING|MIIM_FTYPE, 80,
+        MFT_SEPARATOR, 0, 0, 0, 0, 0, 0, NULL, 0, 0,
+        NULL, OK, ER );
     TMII_DONE
 
     /* How is that with bitmaps? */ 

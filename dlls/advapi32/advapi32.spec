@@ -84,7 +84,7 @@
 @ stdcall ClearEventLogA (long str)
 @ stdcall ClearEventLogW (long wstr)
 # @ stub CloseCodeAuthzLevel
-# @ stub CloseEncryptedFileRaw
+@ stdcall CloseEncryptedFileRaw(ptr)
 @ stdcall CloseEventLog (long)
 @ stdcall CloseServiceHandle(long)
 # @ stub CloseThreadWaitChainSession
@@ -507,8 +507,8 @@
 @ stdcall ObjectPrivilegeAuditAlarmW(wstr ptr long long ptr long)
 @ stdcall OpenBackupEventLogA (str str)
 @ stdcall OpenBackupEventLogW (wstr wstr)
-# @ stub OpenEncryptedFileRawA
-# @ stub OpenEncryptedFileRawW
+@ stdcall OpenEncryptedFileRawA(str long ptr)
+@ stdcall OpenEncryptedFileRawW(wstr long ptr)
 @ stdcall OpenEventLogA (str str)
 @ stdcall OpenEventLogW (wstr wstr)
 @ stdcall OpenProcessToken(long long ptr)
@@ -566,7 +566,7 @@
 @ stdcall QueryTraceW(int64 wstr ptr)
 # @ stub QueryUsersOnEncryptedFile
 @ stdcall QueryWindows31FilesMigration(long)
-# @ stub ReadEncryptedFileRaw
+@ stdcall ReadEncryptedFileRaw(ptr ptr ptr)
 @ stdcall ReadEventLogA (long long long ptr long ptr ptr)
 @ stdcall ReadEventLogW (long long long ptr long ptr ptr)
 @ stdcall RegCloseKey(long)
@@ -588,8 +588,8 @@
 # @ stub RegDeleteKeyTransactedA
 # @ stub RegDeleteKeyTransactedW
 @ stdcall RegDeleteKeyW(long wstr)
-# @ stub RegDeleteKeyValueA
-# @ stub RegDeleteKeyValueW
+@ stdcall RegDeleteKeyValueA(long str str)
+@ stdcall RegDeleteKeyValueW(long wstr wstr)
 @ stdcall RegDeleteTreeA(long str)
 @ stdcall RegDeleteTreeW(long wstr)
 @ stdcall RegDeleteValueA(long str)
@@ -645,8 +645,8 @@
 # @ stub RegSaveKeyExW
 @ stdcall RegSaveKeyW(long ptr ptr)
 @ stdcall RegSetKeySecurity(long long ptr)
-# @ stub RegSetKeyValueA
-# @ stub RegSetKeyValueW
+@ stdcall RegSetKeyValueA(long str str long ptr long)
+@ stdcall RegSetKeyValueW(long wstr wstr long ptr long)
 @ stdcall RegSetValueA(long str long ptr long)
 @ stdcall RegSetValueExA(long str long long ptr long)
 @ stdcall RegSetValueExW(long wstr long long ptr long)
@@ -825,4 +825,4 @@
 # @ stub WmiSetSingleItemA
 # @ stub WmiSetSingleItemW
 # @ stub Wow64Win32ApiEntry
-# @ stub WriteEncryptedFileRaw
+@ stdcall WriteEncryptedFileRaw(ptr ptr ptr)

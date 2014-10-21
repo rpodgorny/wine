@@ -35,9 +35,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(gameux);
 
-/* function from Shell32, not defined in header */
-extern BOOL WINAPI GUIDFromStringW(LPCWSTR psz, LPGUID pguid);
-
 /*******************************************************************************
  * GameUX helper functions
  */
@@ -325,67 +322,58 @@ static HRESULT GAMEUX_ProcessGameDefinitionElement(
  *  GameData                            [O]     structure where data loaded from
  *                                              XML element will be stored in
  */
-static HRESULT GAMEUX_ParseGameDefinition(
-        IXMLDOMElement *gdElement,
-        struct GAMEUX_GAME_DATA *GameData)
+static HRESULT GAMEUX_ParseGameDefinition(IXMLDOMElement *gamedef, struct GAMEUX_GAME_DATA *game_data)
 {
-    static const WCHAR sGameId[] = {'g','a','m','e','I','D',0};
+    static const WCHAR gameidW[] = {'g','a','m','e','I','D',0};
+    IXMLDOMNodeList *props;
+    VARIANT var;
+    HRESULT hr;
+    BSTR attr;
 
-    HRESULT hr = S_OK;
-    BSTR bstrAttribute;
-    VARIANT variant;
-    IXMLDOMNodeList *childrenList;
-    IXMLDOMNode *nextNode;
-    IXMLDOMElement *nextElement;
+    TRACE("(%p, %p)\n", gamedef, game_data);
 
-    TRACE("(%p, %p)\n", gdElement, GameData);
+    attr = SysAllocString(gameidW);
+    if (!attr)
+        return E_OUTOFMEMORY;
 
-    bstrAttribute = SysAllocString(sGameId);
-    if(!bstrAttribute)
-        hr = E_OUTOFMEMORY;
+    hr = IXMLDOMElement_getAttribute(gamedef, attr, &var);
+    SysFreeString(attr);
 
-    hr = IXMLDOMElement_getAttribute(gdElement, bstrAttribute, &variant);
-
-    if(SUCCEEDED(hr))
+    if (SUCCEEDED(hr))
     {
-        hr = ( GUIDFromStringW(V_BSTR(&variant), &GameData->guidApplicationId)==TRUE ? S_OK : E_FAIL);
-
-        SysFreeString(V_BSTR(&variant));
+        hr = CLSIDFromString(V_BSTR(&var), &game_data->guidApplicationId);
+        VariantClear(&var);
     }
 
-    SysFreeString(bstrAttribute);
+    if (SUCCEEDED(hr))
+        hr = IXMLDOMElement_get_childNodes(gamedef, &props);
 
-    /* browse subnodes */
-    if(SUCCEEDED(hr))
-        hr = IXMLDOMElement_get_childNodes(gdElement, &childrenList);
+    if (FAILED(hr))
+        return hr;
 
-    if(SUCCEEDED(hr))
+    do
     {
-        do
+        IXMLDOMNode *prop;
+
+        hr = IXMLDOMNodeList_nextNode(props, &prop);
+        if (hr == S_OK)
         {
-            hr = IXMLDOMNodeList_nextNode(childrenList, &nextNode);
+            IXMLDOMElement *element;
 
-            if(hr == S_OK)
+            hr = IXMLDOMNode_QueryInterface(prop, &IID_IXMLDOMElement, (void**)&element);
+            if (hr == S_OK)
             {
-                hr = IXMLDOMNode_QueryInterface(nextNode, &IID_IXMLDOMElement,
-                                                (LPVOID*)&nextElement);
-
-                if(SUCCEEDED(hr))
-                {
-                    hr = GAMEUX_ProcessGameDefinitionElement(nextElement, GameData);
-                    IXMLDOMElement_Release(nextElement);
-                }
-
-                IXMLDOMNode_Release(nextNode);
+                hr = GAMEUX_ProcessGameDefinitionElement(element, game_data);
+                IXMLDOMElement_Release(element);
             }
+
+            IXMLDOMNode_Release(prop);
         }
-        while(hr == S_OK);
-        hr = S_OK;
-
-        IXMLDOMNodeList_Release(childrenList);
     }
+    while (hr == S_OK);
+    IXMLDOMNodeList_Release(props);
 
-    return hr;
+    return FAILED(hr) ? hr : S_OK;
 }
 
 struct parse_gdf_thread_param
@@ -789,7 +777,7 @@ HRESULT GAMEUX_FindGameInstanceId(
                     if(lstrcmpW(lpValue, sGDFBinaryPath)==0)
                     {
                         /* key found, let's copy instance id and exit */
-                        hr = (GUIDFromStringW(lpName, pInstanceId) ? S_OK : E_FAIL);
+                        hr = CLSIDFromString(lpName, pInstanceId);
                         found = TRUE;
                     }
                     HeapFree(GetProcessHeap(), 0, lpValue);

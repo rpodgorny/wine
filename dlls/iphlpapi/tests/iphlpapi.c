@@ -858,6 +858,11 @@ static void testSetTcpEntry(void)
     }
 
     ret = pSetTcpEntry(&row);
+    if (ret == ERROR_NETWORK_ACCESS_DENIED)
+    {
+        win_skip("SetTcpEntry failed with access error. Skipping test.\n");
+        return;
+    }
     todo_wine ok( ret == ERROR_INVALID_PARAMETER, "got %u, expected %u\n", ret, ERROR_INVALID_PARAMETER);
 
     U(row).dwState = MIB_TCP_STATE_DELETE_TCB;
@@ -875,7 +880,7 @@ static void testIcmpSendEcho(void)
 
     if (!pIcmpSendEcho || !pIcmpCreateFile)
     {
-        win_skip( "ImcpSendEcho or IcmpCreateFile not available\n" );
+        win_skip( "IcmpSendEcho or IcmpCreateFile not available\n" );
         return;
     }
     memset(senddata, 0, sizeof(senddata));

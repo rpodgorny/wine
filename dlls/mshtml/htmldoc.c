@@ -592,27 +592,13 @@ static HRESULT WINAPI HTMLDocument_get_readyState(IHTMLDocument2 *iface, BSTR *p
 {
     HTMLDocument *This = impl_from_IHTMLDocument2(iface);
 
-    static const WCHAR wszUninitialized[] = {'u','n','i','n','i','t','i','a','l','i','z','e','d',0};
-    static const WCHAR wszLoading[] = {'l','o','a','d','i','n','g',0};
-    static const WCHAR wszLoaded[] = {'l','o','a','d','e','d',0};
-    static const WCHAR wszInteractive[] = {'i','n','t','e','r','a','c','t','i','v','e',0};
-    static const WCHAR wszComplete[] = {'c','o','m','p','l','e','t','e',0};
-
-    static const LPCWSTR readystate_str[] = {
-        wszUninitialized,
-        wszLoading,
-        wszLoaded,
-        wszInteractive,
-        wszComplete
-    };
 
     TRACE("(%p)->(%p)\n", iface, p);
 
     if(!p)
         return E_POINTER;
 
-    *p = SysAllocString(readystate_str[This->window->readystate]);
-    return S_OK;
+    return get_readystate_string(This->window->readystate, p);
 }
 
 static HRESULT WINAPI HTMLDocument_get_frames(IHTMLDocument2 *iface, IHTMLFramesCollection2 **p)
@@ -1578,8 +1564,17 @@ static HRESULT WINAPI HTMLDocument_get_onerrorupdate(IHTMLDocument2 *iface, VARI
 static HRESULT WINAPI HTMLDocument_toString(IHTMLDocument2 *iface, BSTR *String)
 {
     HTMLDocument *This = impl_from_IHTMLDocument2(iface);
-    FIXME("(%p)->(%p)\n", This, String);
-    return E_NOTIMPL;
+
+    static const WCHAR objectW[] = {'[','o','b','j','e','c','t',']',0};
+
+    TRACE("(%p)->(%p)\n", This, String);
+
+    if(!String)
+        return E_INVALIDARG;
+
+    *String = SysAllocString(objectW);
+    return *String ? S_OK : E_OUTOFMEMORY;
+
 }
 
 static HRESULT WINAPI HTMLDocument_createStyleSheet(IHTMLDocument2 *iface, BSTR bstrHref,
@@ -1616,10 +1611,14 @@ static HRESULT WINAPI HTMLDocument_createStyleSheet(IHTMLDocument2 *iface, BSTR 
 
     nsres = nsIDOMHTMLDocument_GetHead(This->doc_node->nsdoc, &head_elem);
     if(NS_SUCCEEDED(nsres)) {
-        nsIDOMNode *tmp_node;
+        nsIDOMNode *head_node, *tmp_node;
 
-        nsres = nsIDOMHTMLHeadElement_AppendChild(head_elem, (nsIDOMNode*)elem->nselem, &tmp_node);
+        nsres = nsIDOMHTMLHeadElement_QueryInterface(head_elem, &IID_nsIDOMNode, (void**)&head_node);
         nsIDOMHTMLHeadElement_Release(head_elem);
+        assert(nsres == NS_OK);
+
+        nsres = nsIDOMNode_AppendChild(head_node, elem->node.nsnode, &tmp_node);
+        nsIDOMNode_Release(head_node);
         if(NS_SUCCEEDED(nsres) && tmp_node)
             nsIDOMNode_Release(tmp_node);
     }
@@ -1821,8 +1820,11 @@ static HRESULT WINAPI HTMLDocument3_releaseCapture(IHTMLDocument3 *iface)
 static HRESULT WINAPI HTMLDocument3_recalc(IHTMLDocument3 *iface, VARIANT_BOOL fForce)
 {
     HTMLDocument *This = impl_from_IHTMLDocument3(iface);
-    FIXME("(%p)->(%x)\n", This, fForce);
-    return E_NOTIMPL;
+
+    WARN("(%p)->(%x)\n", This, fForce);
+
+    /* Doing nothing here should be fine for us. */
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument3_createTextNode(IHTMLDocument3 *iface, BSTR text,
@@ -2608,8 +2610,21 @@ static HRESULT WINAPI HTMLDocument5_get_doctype(IHTMLDocument5 *iface, IHTMLDOMN
 static HRESULT WINAPI HTMLDocument5_get_implementation(IHTMLDocument5 *iface, IHTMLDOMImplementation **p)
 {
     HTMLDocument *This = impl_from_IHTMLDocument5(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    HTMLDocumentNode *doc_node = This->doc_node;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!doc_node->dom_implementation) {
+        HRESULT hres;
+
+        hres = create_dom_implementation(&doc_node->dom_implementation);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    IHTMLDOMImplementation_AddRef(doc_node->dom_implementation);
+    *p = doc_node->dom_implementation;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument5_createAttribute(IHTMLDocument5 *iface, BSTR bstrattrName,
@@ -4330,11 +4345,7 @@ static void HTMLDocumentNode_destructor(HTMLDOMNode *iface)
         This->nsnode_selector = NULL;
     }
 
-    if(This->nsdoc) {
-        assert(!This->window);
-        release_document_mutation(This);
-        nsIDOMHTMLDocument_Release(This->nsdoc);
-    }else if(This->window) {
+    if(!This->nsdoc && This->window) {
         /* document fragments own reference to inner window */
         IHTMLWindow2_Release(&This->window->base.IHTMLWindow2_iface);
         This->window = NULL;

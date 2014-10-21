@@ -57,8 +57,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(oss);
 
 #define NULL_PTR_ERR MAKE_HRESULT(SEVERITY_ERROR, FACILITY_WIN32, RPC_X_NULL_REF_POINTER)
 
-static const REFERENCE_TIME DefaultPeriod = 200000;
-static const REFERENCE_TIME MinimumPeriod = 100000;
+static const REFERENCE_TIME DefaultPeriod = 100000;
+static const REFERENCE_TIME MinimumPeriod = 50000;
 
 struct ACImpl;
 typedef struct ACImpl ACImpl;
@@ -712,9 +712,21 @@ static ULONG WINAPI AudioClient_Release(IAudioClient *iface)
 {
     ACImpl *This = impl_from_IAudioClient(iface);
     ULONG ref;
+
     ref = InterlockedDecrement(&This->ref);
     TRACE("(%p) Refcount now %u\n", This, ref);
     if(!ref){
+        if(This->timer){
+            HANDLE event;
+            DWORD wait;
+            event = CreateEventW(NULL, TRUE, FALSE, NULL);
+            wait = !DeleteTimerQueueTimer(g_timer_q, This->timer, event);
+            wait = wait && GetLastError() == ERROR_IO_PENDING;
+            if(event && wait)
+                WaitForSingleObject(event, INFINITE);
+            CloseHandle(event);
+        }
+
         IAudioClient_Stop(iface);
         IMMDevice_Release(This->parent);
         IUnknown_Release(This->pUnkFTMarshal);
@@ -1099,6 +1111,8 @@ static HRESULT WINAPI AudioClient_Initialize(IAudioClient *iface,
     This->period_frames = MulDiv(fmt->nSamplesPerSec, period, 10000000);
 
     This->bufsize_frames = MulDiv(duration, fmt->nSamplesPerSec, 10000000);
+    if(mode == AUDCLNT_SHAREMODE_EXCLUSIVE)
+        This->bufsize_frames -= This->bufsize_frames % This->period_frames;
     This->local_buffer = HeapAlloc(GetProcessHeap(), 0,
             This->bufsize_frames * fmt->nBlockAlign);
     if(!This->local_buffer){
@@ -1540,10 +1554,12 @@ static HRESULT WINAPI AudioClient_Start(IAudioClient *iface)
         return AUDCLNT_E_NOT_STOPPED;
     }
 
-    if(!CreateTimerQueueTimer(&This->timer, g_timer_q,
-                oss_period_callback, This, 0, This->period_us / 1000,
-                WT_EXECUTEINTIMERTHREAD))
-        ERR("Unable to create period timer: %u\n", GetLastError());
+    if(!This->timer){
+        if(!CreateTimerQueueTimer(&This->timer, g_timer_q,
+                    oss_period_callback, This, 0, This->period_us / 1000,
+                    WT_EXECUTEINTIMERTHREAD))
+            ERR("Unable to create period timer: %u\n", GetLastError());
+    }
 
     This->playing = TRUE;
 
@@ -1555,8 +1571,6 @@ static HRESULT WINAPI AudioClient_Start(IAudioClient *iface)
 static HRESULT WINAPI AudioClient_Stop(IAudioClient *iface)
 {
     ACImpl *This = impl_from_IAudioClient(iface);
-    HANDLE event;
-    DWORD wait;
 
     TRACE("(%p)\n", This);
 
@@ -1572,19 +1586,9 @@ static HRESULT WINAPI AudioClient_Stop(IAudioClient *iface)
         return S_FALSE;
     }
 
-    event = CreateEventW(NULL, TRUE, FALSE, NULL);
-    wait = !DeleteTimerQueueTimer(g_timer_q, This->timer, event);
-    if(wait)
-        WARN("DeleteTimerQueueTimer error %u\n", GetLastError());
-    wait = wait && GetLastError() == ERROR_IO_PENDING;
-
     This->playing = FALSE;
 
     LeaveCriticalSection(&This->lock);
-
-    if(event && wait)
-        WaitForSingleObject(event, INFINITE);
-    CloseHandle(event);
 
     return S_OK;
 }
@@ -2143,7 +2147,10 @@ static HRESULT WINAPI AudioClock_GetFrequency(IAudioClock *iface, UINT64 *freq)
 
     TRACE("(%p)->(%p)\n", This, freq);
 
-    *freq = This->fmt->nSamplesPerSec;
+    if(This->share == AUDCLNT_SHAREMODE_SHARED)
+        *freq = (UINT64)This->fmt->nSamplesPerSec * This->fmt->nBlockAlign;
+    else
+        *freq = This->fmt->nSamplesPerSec;
 
     return S_OK;
 }
@@ -2192,6 +2199,9 @@ static HRESULT WINAPI AudioClock_GetPosition(IAudioClock *iface, UINT64 *pos,
     }
 
     This->last_pos_frames = *pos;
+
+    if(This->share == AUDCLNT_SHAREMODE_SHARED)
+        *pos *= This->fmt->nBlockAlign;
 
     LeaveCriticalSection(&This->lock);
 

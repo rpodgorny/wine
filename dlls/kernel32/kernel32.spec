@@ -542,8 +542,8 @@
 @ stdcall GetFileSizeEx(long ptr)
 @ stdcall GetFileTime(long ptr ptr ptr)
 @ stdcall GetFileType(long)
-# @ stub GetFirmwareEnvironmentVariableA
-# @ stub GetFirmwareEnvironmentVariableW
+@ stdcall GetFirmwareEnvironmentVariableA(str str ptr long)
+@ stdcall GetFirmwareEnvironmentVariableW(wstr wstr ptr long)
 @ stdcall GetFullPathNameA(str long ptr ptr)
 @ stdcall GetFullPathNameW(wstr long ptr ptr)
 @ stdcall GetGeoInfoA(long long ptr long long)
@@ -637,6 +637,7 @@
 @ stdcall GetStringTypeExA(long long str long ptr)
 @ stdcall GetStringTypeExW(long long wstr long ptr)
 @ stdcall GetStringTypeW(long wstr long ptr)
+@ stdcall GetSystemFileCacheSize(ptr ptr ptr)
 @ stdcall GetSystemDefaultLCID()
 @ stdcall GetSystemDefaultLangID()
 @ stdcall GetSystemDefaultLocaleName(ptr long)
@@ -1166,6 +1167,7 @@
 @ stdcall SetProcessShutdownParameters(long long)
 @ stdcall SetProcessWorkingSetSize(long long long)
 @ stdcall SetStdHandle(long long)
+@ stdcall SetSystemFileCacheSize(long long long)
 @ stdcall SetSystemPowerState(long long)
 @ stdcall SetSystemTime(ptr)
 @ stdcall SetSystemTimeAdjustment(long long)
@@ -1237,6 +1239,7 @@
 @ stdcall UnlockFile(long long long long long)
 @ stdcall UnlockFileEx(long long long long ptr)
 @ stdcall UnmapViewOfFile(ptr)
+@ stdcall UnregisterApplicationRestart()
 # @ stub UnregisterConsoleIME
 @ stdcall UnregisterWait(long)
 @ stdcall UnregisterWaitEx(long long)

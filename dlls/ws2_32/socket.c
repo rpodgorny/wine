@@ -100,7 +100,6 @@
 
 #ifdef HAVE_NETIPX_IPX_H
 # include <netipx/ipx.h>
-# define HAS_IPX
 #elif defined(HAVE_LINUX_IPX_H)
 # ifdef HAVE_ASM_TYPES_H
 #  include <asm/types.h>
@@ -109,6 +108,8 @@
 #  include <linux/types.h>
 # endif
 # include <linux/ipx.h>
+#endif
+#if defined(SOL_IPX) || defined(SO_DEFAULT_HEADERS)
 # define HAS_IPX
 #endif
 
@@ -528,7 +529,9 @@ static const int ws_aiflag_map[][2] =
 #ifdef AI_NUMERICSERV
     MAP_OPTION( AI_NUMERICSERV ),
 #endif
+#ifdef  AI_V4MAPPED
     MAP_OPTION( AI_V4MAPPED ),
+#endif
     MAP_OPTION( AI_ADDRCONFIG ),
 };
 
@@ -568,6 +571,7 @@ static const int ws_eai_map[][2] =
 static const char magic_loopback_addr[] = {127, 12, 34, 56};
 
 #ifndef HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS
+#ifdef IP_PKTINFO
 static inline WSACMSGHDR *fill_control_message(int level, int type, WSACMSGHDR *current, ULONG *maxsize, void *data, int len)
 {
     ULONG msgsize = sizeof(WSACMSGHDR) + WSA_CMSG_ALIGN(len);
@@ -585,6 +589,7 @@ static inline WSACMSGHDR *fill_control_message(int level, int type, WSACMSGHDR *
     /* Return the pointer to where next entry should go */
     return (WSACMSGHDR *) (ptr + WSA_CMSG_ALIGN(len));
 }
+#endif /* IP_PKTINFO */
 
 static inline int convert_control_headers(struct msghdr *hdr, WSABUF *control)
 {
@@ -1237,7 +1242,7 @@ int WINAPI WSAStartup(WORD wVersionRequested, LPWSADATA lpWSAData)
     /* don't do anything with lpWSAData->lpVendorInfo */
     /* (some apps don't allocate the space for this field) */
 
-    TRACE("succeeded\n");
+    TRACE("succeeded starts: %d\n", num_startup);
     return 0;
 }
 
@@ -1249,6 +1254,7 @@ INT WINAPI WSACleanup(void)
 {
     if (num_startup) {
         num_startup--;
+        TRACE("pending cleanups: %d\n", num_startup);
         return 0;
     }
     SetLastError(WSANOTINITIALISED);
@@ -1822,6 +1828,7 @@ static INT WS_EnumProtocols( BOOL unicode, const INT *protocols, LPWSAPROTOCOL_I
 
     for (i = items = 0; protocols[i]; i++)
     {
+        if (!supported_protocol(protocols[i])) continue;
         if (unicode)
         {
             if (WS_EnterSingleProtocolW( protocols[i], &info.w[items] ))
@@ -1921,8 +1928,11 @@ static int WS2_recv( int fd, struct ws2_async *wsa )
     hdr.msg_flags = 0;
 #endif
 
-    if ( (n = recvmsg(fd, &hdr, wsa->flags)) == -1 )
-        return -1;
+    while ((n = recvmsg(fd, &hdr, wsa->flags)) == -1)
+    {
+        if (errno != EINTR)
+            return -1;
+    }
 
 #ifdef HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS
     if (wsa->control)
@@ -1981,7 +1991,7 @@ static NTSTATUS WS2_async_recv( void* user, IO_STATUS_BLOCK* iosb, NTSTATUS stat
         }
         else
         {
-            if (errno == EINTR || errno == EAGAIN)
+            if (errno == EAGAIN)
             {
                 status = STATUS_PENDING;
                 _enable_event( wsa->hSocket, FD_READ, 0, 0 );
@@ -2172,17 +2182,19 @@ static int WS2_send( int fd, struct ws2_async *wsa )
     hdr.msg_flags = 0;
 #endif
 
-    ret = sendmsg(fd, &hdr, wsa->flags);
-    if (ret >= 0)
+    while ((ret = sendmsg(fd, &hdr, wsa->flags)) == -1)
     {
-        n = ret;
-        while (wsa->first_iovec < wsa->n_iovecs && wsa->iovec[wsa->first_iovec].iov_len <= n)
-            n -= wsa->iovec[wsa->first_iovec++].iov_len;
-        if (wsa->first_iovec < wsa->n_iovecs)
-        {
-            wsa->iovec[wsa->first_iovec].iov_base = (char*)wsa->iovec[wsa->first_iovec].iov_base + n;
-            wsa->iovec[wsa->first_iovec].iov_len -= n;
-        }
+        if (errno != EINTR)
+            return -1;
+    }
+
+    n = ret;
+    while (wsa->first_iovec < wsa->n_iovecs && wsa->iovec[wsa->first_iovec].iov_len <= n)
+        n -= wsa->iovec[wsa->first_iovec++].iov_len;
+    if (wsa->first_iovec < wsa->n_iovecs)
+    {
+        wsa->iovec[wsa->first_iovec].iov_base = (char*)wsa->iovec[wsa->first_iovec].iov_base + n;
+        wsa->iovec[wsa->first_iovec].iov_len -= n;
     }
     return ret;
 }
@@ -2222,7 +2234,7 @@ static NTSTATUS WS2_async_send(void* user, IO_STATUS_BLOCK* iosb, NTSTATUS statu
 
             iosb->Information += result;
         }
-        else if (errno == EINTR || errno == EAGAIN)
+        else if (errno == EAGAIN)
         {
             status = STATUS_PENDING;
         }
@@ -2281,7 +2293,7 @@ static int WS2_register_async_shutdown( SOCKET s, int type )
     struct ws2_async *wsa;
     NTSTATUS status;
 
-    TRACE("s %ld type %d\n", s, type);
+    TRACE("s %04lx type %d\n", s, type);
 
     wsa = HeapAlloc( GetProcessHeap(), 0, FIELD_OFFSET( struct ws2_async, iovec[1] ));
     if ( !wsa )
@@ -3732,7 +3744,7 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
     int fd;
     DWORD status = 0, total = 0;
 
-    TRACE("%ld, %s, %p, %d, %p, %d, %p, %p, %p\n",
+    TRACE("%04lx, %s, %p, %d, %p, %d, %p, %p, %p\n",
           s, debugstr_wsaioctl(code), in_buff, in_size, out_buff, out_size, ret_size, overlapped, completion);
 
     switch (code)
@@ -3925,9 +3937,20 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
             return SOCKET_ERROR;
         }
 
+        if (out_size && out_size < FIELD_OFFSET(SOCKET_ADDRESS_LIST, Address[0]))
+        {
+            *ret_size = 0;
+            WSASetLastError(WSAEINVAL);
+            return SOCKET_ERROR;
+        }
+
         if (GetAdaptersInfo(NULL, &size) == ERROR_BUFFER_OVERFLOW)
         {
             IP_ADAPTER_INFO *p, *table = HeapAlloc(GetProcessHeap(), 0, size);
+            SOCKET_ADDRESS_LIST *sa_list;
+            SOCKADDR_IN *sockaddr;
+            SOCKET_ADDRESS *sa;
+            unsigned int i;
             DWORD num;
 
             if (!table || GetAdaptersInfo(table, &size))
@@ -3940,39 +3963,31 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
             for (p = table, num = 0; p; p = p->Next)
                 if (p->IpAddressList.IpAddress.String[0]) num++;
 
-            total = sizeof(SOCKET_ADDRESS_LIST) + sizeof(SOCKET_ADDRESS) * (num - 1);
-            total += sizeof(SOCKADDR) * num;
-
-            if (total > out_size)
+            total = FIELD_OFFSET(SOCKET_ADDRESS_LIST, Address[num]) + num * sizeof(*sockaddr);
+            if (total > out_size || !out_buff)
             {
+                *ret_size = total;
                 HeapFree(GetProcessHeap(), 0, table);
                 status = WSAEFAULT;
                 break;
             }
 
-            if (out_buff)
+            sa_list = out_buff;
+            sa = sa_list->Address;
+            sockaddr = (SOCKADDR_IN *)&sa[num];
+            sa_list->iAddressCount = num;
+
+            for (p = table, i = 0; p; p = p->Next)
             {
-                unsigned int i;
-                SOCKET_ADDRESS *sa;
-                SOCKET_ADDRESS_LIST *sa_list = out_buff;
-                SOCKADDR_IN *sockaddr;
+                if (!p->IpAddressList.IpAddress.String[0]) continue;
 
-                sa = sa_list->Address;
-                sockaddr = (SOCKADDR_IN *)((char *)sa + num * sizeof(SOCKET_ADDRESS));
-                sa_list->iAddressCount = num;
+                sa[i].lpSockaddr = (SOCKADDR *)&sockaddr[i];
+                sa[i].iSockaddrLength = sizeof(SOCKADDR);
 
-                for (p = table, i = 0; p; p = p->Next)
-                {
-                    if (!p->IpAddressList.IpAddress.String[0]) continue;
-
-                    sa[i].lpSockaddr = (SOCKADDR *)&sockaddr[i];
-                    sa[i].iSockaddrLength = sizeof(SOCKADDR);
-
-                    sockaddr[i].sin_family = AF_INET;
-                    sockaddr[i].sin_port = 0;
-                    sockaddr[i].sin_addr.WS_s_addr = inet_addr(p->IpAddressList.IpAddress.String);
-                    i++;
-                }
+                sockaddr[i].sin_family = AF_INET;
+                sockaddr[i].sin_port = 0;
+                sockaddr[i].sin_addr.WS_s_addr = inet_addr(p->IpAddressList.IpAddress.String);
+                i++;
             }
 
             HeapFree(GetProcessHeap(), 0, table);
@@ -4512,10 +4527,9 @@ static int WS2_sendto( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
                        LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine )
 {
     unsigned int i, options;
-    int n, fd, err;
-    struct ws2_async *wsa = NULL;
+    int n, fd, err, overlapped;
+    struct ws2_async *wsa = NULL, localwsa;
     int totalLength = 0;
-    ULONG_PTR cvalue = (lpOverlapped && ((ULONG_PTR)lpOverlapped->hEvent & 1) == 0) ? (ULONG_PTR)lpOverlapped : 0;
     DWORD bytes_sent;
     BOOL is_blocking;
 
@@ -4533,11 +4547,19 @@ static int WS2_sendto( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
         err = WSAEFAULT;
         goto error;
     }
-    if (!(wsa = HeapAlloc( GetProcessHeap(), 0, FIELD_OFFSET(struct ws2_async, iovec[dwBufferCount]) )))
+
+    overlapped = (lpOverlapped || lpCompletionRoutine) &&
+        !(options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT));
+    if (overlapped || dwBufferCount > 1)
     {
-        err = WSAEFAULT;
-        goto error;
+        if (!(wsa = HeapAlloc( GetProcessHeap(), 0, FIELD_OFFSET(struct ws2_async, iovec[dwBufferCount]) )))
+        {
+            err = WSAEFAULT;
+            goto error;
+        }
     }
+    else
+        wsa = &localwsa;
 
     wsa->hSocket     = SOCKET2HANDLE(s);
     wsa->addr        = (struct WS_sockaddr *)to;
@@ -4554,21 +4576,17 @@ static int WS2_sendto( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
         totalLength += lpBuffers[i].len;
     }
 
-    for (;;)
-    {
-        n = WS2_send( fd, wsa );
-        if (n != -1 || errno != EINTR) break;
-    }
+    n = WS2_send( fd, wsa );
     if (n == -1 && errno != EAGAIN)
     {
         err = wsaErrno();
         goto error;
     }
 
-    if ((lpOverlapped || lpCompletionRoutine) &&
-        !(options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT)))
+    if (overlapped)
     {
         IO_STATUS_BLOCK *iosb = lpOverlapped ? (IO_STATUS_BLOCK *)lpOverlapped : &wsa->local_iosb;
+        ULONG_PTR cvalue = (lpOverlapped && ((ULONG_PTR)lpOverlapped->hEvent & 1) == 0) ? (ULONG_PTR)lpOverlapped : 0;
 
         wsa->user_overlapped = lpOverlapped;
         wsa->completion_func = lpCompletionRoutine;
@@ -4651,7 +4669,7 @@ static int WS2_sendto( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
             }
 
             n = WS2_send( fd, wsa );
-            if (n == -1 && errno != EAGAIN && errno != EINTR)
+            if (n == -1 && errno != EAGAIN)
             {
                 err = wsaErrno();
                 goto error;
@@ -4676,13 +4694,13 @@ static int WS2_sendto( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
     TRACE(" -> %i bytes\n", bytes_sent);
 
     if (lpNumberOfBytesSent) *lpNumberOfBytesSent = bytes_sent;
-    HeapFree( GetProcessHeap(), 0, wsa );
+    if (wsa != &localwsa) HeapFree( GetProcessHeap(), 0, wsa );
     release_sock_fd( s, fd );
     WSASetLastError(0);
     return 0;
 
 error:
-    HeapFree( GetProcessHeap(), 0, wsa );
+    if (wsa != &localwsa) HeapFree( GetProcessHeap(), 0, wsa );
     release_sock_fd( s, fd );
     WARN(" -> ERROR %d\n", err);
     WSASetLastError(err);
@@ -4749,7 +4767,7 @@ int WINAPI WS_setsockopt(SOCKET s, int level, int optname,
         switch(optname)
         {
         /* Some options need some conversion before they can be sent to
-         * setsockopt. The conversions are done here, then they will fall though
+         * setsockopt. The conversions are done here, then they will fall through
          * to the general case. Special options that are not passed to
          * setsockopt follow below that.*/
 
@@ -6523,8 +6541,8 @@ static int WS2_recv_base( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
                           LPWSABUF lpControlBuffer )
 {
     unsigned int i, options;
-    int n, fd, err;
-    struct ws2_async *wsa;
+    int n, fd, err, overlapped;
+    struct ws2_async *wsa, localwsa;
     BOOL is_blocking;
     DWORD timeout_start = GetTickCount();
     ULONG_PTR cvalue = (lpOverlapped && ((ULONG_PTR)lpOverlapped->hEvent & 1) == 0) ? (ULONG_PTR)lpOverlapped : 0;
@@ -6539,11 +6557,18 @@ static int WS2_recv_base( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
 
     if (fd == -1) return SOCKET_ERROR;
 
-    if (!(wsa = HeapAlloc( GetProcessHeap(), 0, FIELD_OFFSET(struct ws2_async, iovec[dwBufferCount]) )))
+    overlapped = (lpOverlapped || lpCompletionRoutine) &&
+        !(options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT));
+    if (overlapped || dwBufferCount > 1)
     {
-        err = WSAEFAULT;
-        goto error;
+        if (!(wsa = HeapAlloc( GetProcessHeap(), 0, FIELD_OFFSET(struct ws2_async, iovec[dwBufferCount]) )))
+        {
+            err = WSAEFAULT;
+            goto error;
+        }
     }
+    else
+        wsa = &localwsa;
 
     wsa->hSocket     = SOCKET2HANDLE(s);
     wsa->flags       = *lpFlags;
@@ -6570,7 +6595,6 @@ static int WS2_recv_base( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
         n = WS2_recv( fd, wsa );
         if (n == -1)
         {
-            if (errno == EINTR) continue;
             if (errno != EAGAIN)
             {
                 int loc_errno = errno;
@@ -6581,8 +6605,7 @@ static int WS2_recv_base( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
         }
         else if (lpNumberOfBytesRecvd) *lpNumberOfBytesRecvd = n;
 
-        if ((lpOverlapped || lpCompletionRoutine) &&
-             !(options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT)))
+        if (overlapped)
         {
             IO_STATUS_BLOCK *iosb = lpOverlapped ? (IO_STATUS_BLOCK *)lpOverlapped : &wsa->local_iosb;
 
@@ -6666,14 +6689,14 @@ static int WS2_recv_base( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
     }
 
     TRACE(" -> %i bytes\n", n);
-    HeapFree( GetProcessHeap(), 0, wsa );
+    if (wsa != &localwsa) HeapFree( GetProcessHeap(), 0, wsa );
     release_sock_fd( s, fd );
     _enable_event(SOCKET2HANDLE(s), FD_READ, 0, 0);
 
     return 0;
 
 error:
-    HeapFree( GetProcessHeap(), 0, wsa );
+    if (wsa != &localwsa) HeapFree( GetProcessHeap(), 0, wsa );
     release_sock_fd( s, fd );
     WARN(" -> ERROR %d\n", err);
     WSASetLastError( err );

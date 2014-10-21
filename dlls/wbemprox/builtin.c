@@ -27,10 +27,10 @@
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
+#include "winsock2.h"
 #include "initguid.h"
 #include "wbemcli.h"
 #include "wbemprov.h"
-#include "winsock2.h"
 #include "iphlpapi.h"
 #include "tlhelp32.h"
 #include "d3d10.h"
@@ -84,6 +84,8 @@ static const WCHAR class_process_getowner_outW[] =
      'N','E','R','_','O','U','T',0};
 static const WCHAR class_processorW[] =
     {'W','i','n','3','2','_','P','r','o','c','e','s','s','o','r',0};
+static const WCHAR class_processor2W[] =
+    {'C','I','M','_','P','r','o','c','e','s','s','o','r',0};
 static const WCHAR class_sounddeviceW[] =
     {'W','i','n','3','2','_','S','o','u','n','d','D','e','v','i','c','e',0};
 static const WCHAR class_videocontrollerW[] =
@@ -311,7 +313,7 @@ static const struct column col_compsys[] =
 {
     { prop_descriptionW,          CIM_STRING },
     { prop_domainW,               CIM_STRING },
-    { prop_domainroleW,           CIM_UINT16 },
+    { prop_domainroleW,           CIM_UINT16, VT_I4 },
     { prop_manufacturerW,         CIM_STRING },
     { prop_modelW,                CIM_STRING },
     { prop_nameW,                 CIM_STRING|COL_FLAG_DYNAMIC },
@@ -378,8 +380,8 @@ static const struct column col_networkadapter[] =
 };
 static const struct column col_networkadapterconfig[] =
 {
-    { prop_indexW,              CIM_UINT32|COL_FLAG_KEY },
-    { prop_ipconnectionmetricW, CIM_UINT32 },
+    { prop_indexW,              CIM_UINT32|COL_FLAG_KEY, VT_I4 },
+    { prop_ipconnectionmetricW, CIM_UINT32, VT_I4 },
     { prop_ipenabledW,          CIM_BOOLEAN },
     { prop_macaddressW,         CIM_STRING|COL_FLAG_DYNAMIC }
 };
@@ -491,14 +493,19 @@ static const struct column col_stdregprov[] =
     { method_enumvaluesW,     CIM_FLAG_ARRAY|COL_FLAG_METHOD },
     { method_getstringvalueW, CIM_FLAG_ARRAY|COL_FLAG_METHOD }
 };
+static const struct column col_systemsecurity[] =
+{
+    { method_getsdW,                    CIM_FLAG_ARRAY|COL_FLAG_METHOD },
+    { method_setsdW,                    CIM_FLAG_ARRAY|COL_FLAG_METHOD },
+};
 static const struct column col_videocontroller[] =
 {
     { prop_adapterdactypeW,       CIM_STRING },
     { prop_adapterramW,           CIM_UINT32, VT_I4 },
     { prop_availabilityW,         CIM_UINT16 },
-    { prop_currentbitsperpixelW,  CIM_UINT32 },
-    { prop_currenthorizontalresW, CIM_UINT32 },
-    { prop_currentverticalresW,   CIM_UINT32 },
+    { prop_currentbitsperpixelW,  CIM_UINT32, VT_I4 },
+    { prop_currenthorizontalresW, CIM_UINT32, VT_I4 },
+    { prop_currentverticalresW,   CIM_UINT32, VT_I4 },
     { prop_descriptionW,          CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_deviceidW,             CIM_STRING|COL_FLAG_KEY },
     { prop_nameW,                 CIM_STRING|COL_FLAG_DYNAMIC },
@@ -798,6 +805,11 @@ struct record_stdregprov
     class_method *enumvalues;
     class_method *getstringvalue;
 };
+struct record_systemsecurity
+{
+    class_method *getsd;
+    class_method *setsd;
+};
 struct record_videocontroller
 {
     const WCHAR *adapter_dactype;
@@ -844,7 +856,11 @@ static const struct record_param data_param[] =
     { class_stdregprovW, method_getstringvalueW, 1, param_subkeynameW, CIM_STRING },
     { class_stdregprovW, method_getstringvalueW, 1, param_valuenameW, CIM_STRING },
     { class_stdregprovW, method_getstringvalueW, -1, param_returnvalueW, CIM_UINT32, VT_I4 },
-    { class_stdregprovW, method_getstringvalueW, -1, param_valueW, CIM_STRING }
+    { class_stdregprovW, method_getstringvalueW, -1, param_valueW, CIM_STRING },
+    { class_systemsecurityW, method_getsdW, -1, param_returnvalueW, CIM_UINT32, VT_I4 },
+    { class_systemsecurityW, method_getsdW, -1, param_sdW, CIM_UINT8|CIM_FLAG_ARRAY },
+    { class_systemsecurityW, method_setsdW, 1, param_sdW, CIM_UINT8|CIM_FLAG_ARRAY },
+    { class_systemsecurityW, method_setsdW, -1, param_returnvalueW, CIM_UINT32, VT_I4 },
 };
 
 #define FLAVOR_ID (WBEM_FLAVOR_FLAG_PROPAGATE_TO_INSTANCE | WBEM_FLAVOR_NOT_OVERRIDABLE |\
@@ -866,6 +882,10 @@ static const struct record_sounddevice data_sounddevice[] =
 static const struct record_stdregprov data_stdregprov[] =
 {
     { reg_enum_key, reg_enum_values, reg_get_stringvalue }
+};
+static const struct record_systemsecurity data_systemsecurity[] =
+{
+    { security_get_sd, security_set_sd }
 };
 
 /* check if row matches condition and update status */
@@ -1496,6 +1516,7 @@ static UINT64 get_freespace( const WCHAR *dir, UINT64 *disksize )
     ULARGE_INTEGER free;
     DISK_GEOMETRY_EX info;
     HANDLE handle;
+    DWORD bytes_returned;
 
     free.QuadPart = 512 * 1024 * 1024;
     GetDiskFreeSpaceExW( dir, NULL, NULL, &free );
@@ -1504,7 +1525,7 @@ static UINT64 get_freespace( const WCHAR *dir, UINT64 *disksize )
     handle = CreateFileW( root, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0 );
     if (handle != INVALID_HANDLE_VALUE)
     {
-        if (DeviceIoControl( handle, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, NULL, 0, &info, sizeof(info), NULL, NULL ))
+        if (DeviceIoControl( handle, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, NULL, 0, &info, sizeof(info), &bytes_returned, NULL ))
             *disksize = info.DiskSize.QuadPart;
         CloseHandle( handle );
     }
@@ -2408,10 +2429,12 @@ static struct table builtin_classes[] =
     { class_physicalmemoryW, SIZEOF(col_physicalmemory), col_physicalmemory, 0, 0, NULL, fill_physicalmemory },
     { class_processW, SIZEOF(col_process), col_process, 0, 0, NULL, fill_process },
     { class_processorW, SIZEOF(col_processor), col_processor, 0, 0, NULL, fill_processor },
+    { class_processor2W, SIZEOF(col_processor), col_processor, 0, 0, NULL, fill_processor },
     { class_qualifiersW, SIZEOF(col_qualifier), col_qualifier, SIZEOF(data_qualifier), 0, (BYTE *)data_qualifier },
     { class_serviceW, SIZEOF(col_service), col_service, 0, 0, NULL, fill_service },
     { class_sounddeviceW, SIZEOF(col_sounddevice), col_sounddevice, SIZEOF(data_sounddevice), 0, (BYTE *)data_sounddevice },
     { class_stdregprovW, SIZEOF(col_stdregprov), col_stdregprov, SIZEOF(data_stdregprov), 0, (BYTE *)data_stdregprov },
+    { class_systemsecurityW, SIZEOF(col_systemsecurity), col_systemsecurity, SIZEOF(data_systemsecurity), 0, (BYTE *)data_systemsecurity },
     { class_videocontrollerW, SIZEOF(col_videocontroller), col_videocontroller, 0, 0, NULL, fill_videocontroller }
 };
 

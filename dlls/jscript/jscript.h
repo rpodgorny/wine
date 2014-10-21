@@ -395,7 +395,6 @@ struct _script_ctx_t {
 
     jsdisp_t *global;
     jsdisp_t *function_constr;
-    jsdisp_t *activex_constr;
     jsdisp_t *array_constr;
     jsdisp_t *bool_constr;
     jsdisp_t *date_constr;
@@ -494,6 +493,8 @@ static inline DWORD make_grfdex(script_ctx_t *ctx, DWORD flags)
 #define JS_E_MISSING_SEMICOLON       MAKE_JSERROR(IDS_SEMICOLON)
 #define JS_E_MISSING_LBRACKET        MAKE_JSERROR(IDS_LBRACKET)
 #define JS_E_MISSING_RBRACKET        MAKE_JSERROR(IDS_RBRACKET)
+#define JS_E_EXPECTED_IDENTIFIER     MAKE_JSERROR(IDS_EXPECTED_IDENTIFIER)
+#define JS_E_EXPECTED_ASSIGN         MAKE_JSERROR(IDS_EXPECTED_ASSIGN)
 #define JS_E_INVALID_CHAR            MAKE_JSERROR(IDS_INVALID_CHAR)
 #define JS_E_UNTERMINATED_STRING     MAKE_JSERROR(IDS_UNTERMINATED_STR)
 #define JS_E_MISPLACED_RETURN        MAKE_JSERROR(IDS_MISPLACED_RETURN)
@@ -501,7 +502,9 @@ static inline DWORD make_grfdex(script_ctx_t *ctx, DWORD flags)
 #define JS_E_INVALID_CONTINUE        MAKE_JSERROR(IDS_INVALID_CONTINUE)
 #define JS_E_LABEL_REDEFINED         MAKE_JSERROR(IDS_LABEL_REDEFINED)
 #define JS_E_LABEL_NOT_FOUND         MAKE_JSERROR(IDS_LABEL_NOT_FOUND)
+#define JS_E_EXPECTED_CCEND          MAKE_JSERROR(IDS_EXPECTED_CCEND)
 #define JS_E_DISABLED_CC             MAKE_JSERROR(IDS_DISABLED_CC)
+#define JS_E_EXPECTED_AT             MAKE_JSERROR(IDS_EXPECTED_AT)
 #define JS_E_FUNCTION_EXPECTED       MAKE_JSERROR(IDS_NOT_FUNC)
 #define JS_E_DATE_EXPECTED           MAKE_JSERROR(IDS_NOT_DATE)
 #define JS_E_NUMBER_EXPECTED         MAKE_JSERROR(IDS_NOT_NUM)
@@ -525,7 +528,6 @@ static inline BOOL is_jscript_error(HRESULT hres)
     return HRESULT_FACILITY(hres) == FACILITY_JSCRIPT;
 }
 
-const char *debugstr_variant(const VARIANT*) DECLSPEC_HIDDEN;
 const char *debugstr_jsval(const jsval_t) DECLSPEC_HIDDEN;
 
 HRESULT create_jscript_object(BOOL,REFIID,void**) DECLSPEC_HIDDEN;

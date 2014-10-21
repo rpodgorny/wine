@@ -102,15 +102,37 @@ static HRESULT WINAPI HTMLImgElement_Invoke(IHTMLImgElement *iface, DISPID dispI
 static HRESULT WINAPI HTMLImgElement_put_isMap(IHTMLImgElement *iface, VARIANT_BOOL v)
 {
     HTMLImgElement *This = impl_from_IHTMLImgElement(iface);
-    FIXME("(%p)->(%x)\n", This, v);
-    return E_NOTIMPL;
+    nsresult nsres;
+
+    TRACE("(%p)->(%x)\n", This, v);
+
+    nsres = nsIDOMHTMLImageElement_SetIsMap(This->nsimg, v != VARIANT_FALSE);
+    if (NS_FAILED(nsres)) {
+        ERR("Set IsMap failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLImgElement_get_isMap(IHTMLImgElement *iface, VARIANT_BOOL *p)
 {
     HTMLImgElement *This = impl_from_IHTMLImgElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    cpp_bool b;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if (p == NULL)
+        return E_INVALIDARG;
+
+    nsres = nsIDOMHTMLImageElement_GetIsMap(This->nsimg, &b);
+    if (NS_FAILED(nsres)) {
+        ERR("Get IsMap failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+    *p = b ? VARIANT_TRUE : VARIANT_FALSE;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLImgElement_put_useMap(IHTMLImgElement *iface, BSTR v)
@@ -390,15 +412,35 @@ static HRESULT WINAPI HTMLImgElement_get_loop(IHTMLImgElement *iface, VARIANT *p
 static HRESULT WINAPI HTMLImgElement_put_align(IHTMLImgElement *iface, BSTR v)
 {
     HTMLImgElement *This = impl_from_IHTMLImgElement(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    nsAString str;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    nsAString_InitDepend(&str, v);
+
+    nsres = nsIDOMHTMLImageElement_SetAlign(This->nsimg, &str);
+    nsAString_Finish(&str);
+    if (NS_FAILED(nsres)){
+        ERR("Set Align(%s) failed: %08x\n", debugstr_w(v), nsres);
+        return E_FAIL;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLImgElement_get_align(IHTMLImgElement *iface, BSTR *p)
 {
     HTMLImgElement *This = impl_from_IHTMLImgElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsAString str;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    nsAString_Init(&str, NULL);
+    nsres = nsIDOMHTMLImageElement_GetAlign(This->nsimg, &str);
+
+    return return_nsstr(nsres, &str, p);
 }
 
 static HRESULT WINAPI HTMLImgElement_put_onload(IHTMLImgElement *iface, VARIANT v)
@@ -644,6 +686,26 @@ static HRESULT HTMLImgElement_get_readystate(HTMLDOMNode *iface, BSTR *p)
     return IHTMLImgElement_get_readyState(&This->IHTMLImgElement_iface, p);
 }
 
+static void HTMLImgElement_traverse(HTMLDOMNode *iface, nsCycleCollectionTraversalCallback *cb)
+{
+    HTMLImgElement *This = impl_from_HTMLDOMNode(iface);
+
+    if(This->nsimg)
+        note_cc_edge((nsISupports*)This->nsimg, "This->nsimg", cb);
+}
+
+static void HTMLImgElement_unlink(HTMLDOMNode *iface)
+{
+    HTMLImgElement *This = impl_from_HTMLDOMNode(iface);
+
+    if(This->nsimg) {
+        nsIDOMHTMLImageElement *nsimg = This->nsimg;
+
+        This->nsimg = NULL;
+        nsIDOMHTMLImageElement_Release(nsimg);
+    }
+}
+
 static const NodeImplVtbl HTMLImgElementImplVtbl = {
     HTMLImgElement_QI,
     HTMLElement_destructor,
@@ -656,7 +718,12 @@ static const NodeImplVtbl HTMLImgElementImplVtbl = {
     NULL,
     NULL,
     NULL,
-    HTMLImgElement_get_readystate
+    HTMLImgElement_get_readystate,
+    NULL,
+    NULL,
+    NULL,
+    HTMLImgElement_traverse,
+    HTMLImgElement_unlink
 };
 
 static const tid_t HTMLImgElement_iface_tids[] = {
@@ -686,10 +753,7 @@ HRESULT HTMLImgElement_Create(HTMLDocumentNode *doc, nsIDOMHTMLElement *nselem, 
     HTMLElement_Init(&ret->element, doc, nselem, &HTMLImgElement_dispex);
 
     nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLImageElement, (void**)&ret->nsimg);
-
-    /* Share nsimg reference with nsnode */
-    assert(nsres == NS_OK && (nsIDOMNode*)ret->nsimg == ret->element.node.nsnode);
-    nsIDOMNode_Release(ret->element.node.nsnode);
+    assert(nsres == NS_OK);
 
     *elem = &ret->element;
     return S_OK;

@@ -142,7 +142,9 @@ static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
  *		call_dll_entry_point
  *
  * Some brain-damaged dlls (ir32_32.dll for instance) modify ebx in
- * their entry point, so we need a small asm wrapper.
+ * their entry point, so we need a small asm wrapper. Testing indicates
+ * that only modifying esi leads to a crash, so use this one to backup
+ * ebp while running the dll entry proc.
  */
 #ifdef __i386__
 extern BOOL call_dll_entry_point( DLLENTRYPROC proc, void *module, UINT reason, void *reserved );
@@ -154,13 +156,24 @@ __ASM_GLOBAL_FUNC(call_dll_entry_point,
                   __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
                   "pushl %ebx\n\t"
                   __ASM_CFI(".cfi_rel_offset %ebx,-4\n\t")
-                  "subl $8,%esp\n\t"
+                  "pushl %esi\n\t"
+                  __ASM_CFI(".cfi_rel_offset %esi,-8\n\t")
+                  "pushl %edi\n\t"
+                  __ASM_CFI(".cfi_rel_offset %edi,-12\n\t")
+                  "movl %ebp,%esi\n\t"
+                  __ASM_CFI(".cfi_def_cfa_register %esi\n\t")
                   "pushl 20(%ebp)\n\t"
                   "pushl 16(%ebp)\n\t"
                   "pushl 12(%ebp)\n\t"
                   "movl 8(%ebp),%eax\n\t"
                   "call *%eax\n\t"
-                  "leal -4(%ebp),%esp\n\t"
+                  "movl %esi,%ebp\n\t"
+                  __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                  "leal -12(%ebp),%esp\n\t"
+                  "popl %edi\n\t"
+                  __ASM_CFI(".cfi_same_value %edi\n\t")
+                  "popl %esi\n\t"
+                  __ASM_CFI(".cfi_same_value %esi\n\t")
                   "popl %ebx\n\t"
                   __ASM_CFI(".cfi_same_value %ebx\n\t")
                   "popl %ebp\n\t"
@@ -921,9 +934,10 @@ static WINE_MODREF *alloc_module( HMODULE hModule, LPCWSTR filename )
     else p = wm->ldr.FullDllName.Buffer;
     RtlInitUnicodeString( &wm->ldr.BaseDllName, p );
 
-    if ((nt->FileHeader.Characteristics & IMAGE_FILE_DLL) && !is_dll_native_subsystem( hModule, nt, p ))
+    if (!(nt->FileHeader.Characteristics & IMAGE_FILE_DLL) || !is_dll_native_subsystem( hModule, nt, p ))
     {
-        wm->ldr.Flags |= LDR_IMAGE_IS_DLL;
+        if (nt->FileHeader.Characteristics & IMAGE_FILE_DLL)
+            wm->ldr.Flags |= LDR_IMAGE_IS_DLL;
         if (nt->OptionalHeader.AddressOfEntryPoint)
             wm->ldr.EntryPoint = (char *)hModule + nt->OptionalHeader.AddressOfEntryPoint;
     }
@@ -1017,7 +1031,7 @@ static void call_tls_callbacks( HMODULE module, UINT reason )
                     GetCurrentThreadId(), *callback, module, reason_names[reason] );
         __TRY
         {
-            (*callback)( module, reason, NULL );
+            call_dll_entry_point( (DLLENTRYPROC)*callback, module, reason, NULL );
         }
         __EXCEPT_ALL
         {
@@ -1049,7 +1063,7 @@ static NTSTATUS MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved 
 
     if (wm->ldr.Flags & LDR_DONT_RESOLVE_REFS) return STATUS_SUCCESS;
     if (wm->ldr.TlsIndex != -1) call_tls_callbacks( wm->ldr.BaseAddress, reason );
-    if (!entry) return STATUS_SUCCESS;
+    if (!entry || !(wm->ldr.Flags & LDR_IMAGE_IS_DLL)) return STATUS_SUCCESS;
 
     if (TRACE_ON(relay))
     {
@@ -1337,17 +1351,33 @@ NTSTATUS WINAPI LdrFindEntryForAddress(const void* addr, PLDR_MODULE* pmod)
 /******************************************************************
  *		LdrLockLoaderLock  (NTDLL.@)
  *
- * Note: flags are not implemented.
+ * Note: some flags are not implemented.
  * Flag 0x01 is used to raise exceptions on errors.
- * Flag 0x02 is used to avoid waiting on the section (does RtlTryEnterCriticalSection instead).
  */
-NTSTATUS WINAPI LdrLockLoaderLock( ULONG flags, ULONG *result, ULONG *magic )
+NTSTATUS WINAPI LdrLockLoaderLock( ULONG flags, ULONG *result, ULONG_PTR *magic )
 {
-    if (flags) FIXME( "flags %x not supported\n", flags );
+    if (flags & ~0x2) FIXME( "flags %x not supported\n", flags );
 
-    if (result) *result = 1;
+    if (result) *result = 0;
+    if (magic) *magic = 0;
+    if (flags & ~0x3) return STATUS_INVALID_PARAMETER_1;
+    if (!result && (flags & 0x2)) return STATUS_INVALID_PARAMETER_2;
     if (!magic) return STATUS_INVALID_PARAMETER_3;
-    RtlEnterCriticalSection( &loader_section );
+
+    if (flags & 0x2)
+    {
+        if (!RtlTryEnterCriticalSection( &loader_section ))
+        {
+            *result = 2;
+            return STATUS_SUCCESS;
+        }
+        *result = 1;
+    }
+    else
+    {
+        RtlEnterCriticalSection( &loader_section );
+        if (result) *result = 1;
+    }
     *magic = GetCurrentThreadId();
     return STATUS_SUCCESS;
 }
@@ -1356,7 +1386,7 @@ NTSTATUS WINAPI LdrLockLoaderLock( ULONG flags, ULONG *result, ULONG *magic )
 /******************************************************************
  *		LdrUnlockLoaderUnlock  (NTDLL.@)
  */
-NTSTATUS WINAPI LdrUnlockLoaderLock( ULONG flags, ULONG magic )
+NTSTATUS WINAPI LdrUnlockLoaderLock( ULONG flags, ULONG_PTR magic )
 {
     if (magic)
     {
@@ -2612,8 +2642,8 @@ static void free_modref( WINE_MODREF *wm )
 
     free_tls_slot( &wm->ldr );
     RtlReleaseActivationContext( wm->ldr.ActivationContext );
-    NtUnmapViewOfSection( NtCurrentProcess(), wm->ldr.BaseAddress );
     if (wm->ldr.Flags & LDR_WINE_INTERNAL) wine_dll_unload( wm->ldr.SectionHandle );
+    NtUnmapViewOfSection( NtCurrentProcess(), wm->ldr.BaseAddress );
     if (cached_modref == wm) cached_modref = NULL;
     RtlFreeUnicodeString( &wm->ldr.FullDllName );
     RtlFreeHeap( GetProcessHeap(), 0, wm->deps );

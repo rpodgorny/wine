@@ -591,6 +591,25 @@ static NTSTATUS get_vprot_flags( DWORD protect, unsigned int *vprot, BOOL image 
 
 
 /***********************************************************************
+ *           mprotect_exec
+ *
+ * Wrapper for mprotect, adds PROT_EXEC if forced by force_exec_prot
+ */
+static inline int mprotect_exec( void *base, size_t size, int unix_prot, unsigned int view_protect )
+{
+    if (force_exec_prot && !(view_protect & VPROT_NOEXEC) &&
+        (unix_prot & PROT_READ) && !(unix_prot & PROT_EXEC))
+    {
+        TRACE( "forcing exec permission on %p-%p\n", base, (char *)base + size - 1 );
+        if (!mprotect( base, size, unix_prot | PROT_EXEC )) return 0;
+        /* exec + write may legitimately fail, in that case fall back to write only */
+        if (!(unix_prot & PROT_WRITE)) return -1;
+    }
+
+    return mprotect( base, size, unix_prot );
+}
+
+/***********************************************************************
  *           VIRTUAL_SetProt
  *
  * Change the protection of a range of pages.
@@ -624,12 +643,12 @@ static BOOL VIRTUAL_SetProt( struct file_view *view, /* [in] Pointer to view */
             p[i] = vprot | (p[i] & VPROT_WRITEWATCH);
             prot = VIRTUAL_GetUnixProt( p[i] );
             if (prot == unix_prot) continue;
-            mprotect( addr, count << page_shift, unix_prot );
+            mprotect_exec( addr, count << page_shift, unix_prot, view->protect );
             addr += count << page_shift;
             unix_prot = prot;
             count = 0;
         }
-        if (count) mprotect( addr, count << page_shift, unix_prot );
+        if (count) mprotect_exec( addr, count << page_shift, unix_prot, view->protect );
         VIRTUAL_DEBUG_DUMP_VIEW( view );
         return TRUE;
     }
@@ -646,18 +665,9 @@ static BOOL VIRTUAL_SetProt( struct file_view *view, /* [in] Pointer to view */
         return TRUE;
     }
 
-    if (force_exec_prot && !(view->protect & VPROT_NOEXEC) &&
-        (unix_prot & PROT_READ) && !(unix_prot & PROT_EXEC))
-    {
-        TRACE( "forcing exec permission on %p-%p\n", base, (char *)base + size - 1 );
-        if (!mprotect( base, size, unix_prot | PROT_EXEC )) goto done;
-        /* exec + write may legitimately fail, in that case fall back to write only */
-        if (!(unix_prot & PROT_WRITE)) return FALSE;
-    }
+    if (mprotect_exec( base, size, unix_prot, view->protect )) /* FIXME: last error */
+        return FALSE;
 
-    if (mprotect( base, size, unix_prot )) return FALSE;  /* FIXME: last error */
-
-done:
     memset( p, vprot, size >> page_shift );
     VIRTUAL_DEBUG_DUMP_VIEW( view );
     return TRUE;
@@ -683,12 +693,12 @@ static void reset_write_watches( struct file_view *view, void *base, SIZE_T size
         p[i] |= VPROT_WRITEWATCH;
         prot = VIRTUAL_GetUnixProt( p[i] );
         if (prot == unix_prot) continue;
-        mprotect( addr, count << page_shift, unix_prot );
+        mprotect_exec( addr, count << page_shift, unix_prot, view->protect );
         addr += count << page_shift;
         unix_prot = prot;
         count = 0;
     }
-    if (count) mprotect( addr, count << page_shift, unix_prot );
+    if (count) mprotect_exec( addr, count << page_shift, unix_prot, view->protect );
 }
 
 
@@ -1522,11 +1532,6 @@ NTSTATUS virtual_handle_fault( LPCVOID addr, DWORD err )
     {
         void *page = ROUND_ADDR( addr, page_mask );
         BYTE *vprot = &view->prot[((const char *)page - (const char *)view->base) >> page_shift];
-        if (*vprot & VPROT_GUARD)
-        {
-            VIRTUAL_SetProt( view, page, page_size, *vprot & ~VPROT_GUARD );
-            ret = STATUS_GUARD_PAGE_VIOLATION;
-        }
         if ((err & EXCEPTION_WRITE_FAULT) && (view->protect & VPROT_WRITEWATCH))
         {
             if (*vprot & VPROT_WRITEWATCH)
@@ -1536,6 +1541,11 @@ NTSTATUS virtual_handle_fault( LPCVOID addr, DWORD err )
             }
             /* ignore fault if page is writable now */
             if (VIRTUAL_GetUnixProt( *vprot ) & PROT_WRITE) ret = STATUS_SUCCESS;
+        }
+        if (*vprot & VPROT_GUARD)
+        {
+            VIRTUAL_SetProt( view, page, page_size, *vprot & ~VPROT_GUARD );
+            ret = STATUS_GUARD_PAGE_VIOLATION;
         }
     }
     server_leave_uninterrupted_section( &csVirtual, &sigset );
@@ -1658,6 +1668,84 @@ BOOL virtual_check_buffer_for_write( void *ptr, SIZE_T size )
     }
     __ENDTRY
     return TRUE;
+}
+
+
+/***********************************************************************
+ *           virtual_uninterrupted_read_memory
+ *
+ * Similar to NtReadVirtualMemory, but without wineserver calls. Moreover
+ * permissions are checked before accessing each page, to ensure that no
+ * exceptions can happen.
+ */
+SIZE_T virtual_uninterrupted_read_memory( const void *addr, void *buffer, SIZE_T size )
+{
+    struct file_view *view;
+    sigset_t sigset;
+    SIZE_T bytes_read = 0;
+
+    if (!size) return 0;
+
+    server_enter_uninterrupted_section( &csVirtual, &sigset );
+    if ((view = VIRTUAL_FindView( addr, size )))
+    {
+        if (!(view->protect & VPROT_SYSTEM))
+        {
+            void *page = ROUND_ADDR( addr, page_mask );
+            BYTE *p = view->prot + (((const char *)page - (const char *)view->base) >> page_shift);
+
+            while (bytes_read < size && (VIRTUAL_GetUnixProt( *p++ ) & PROT_READ))
+            {
+                SIZE_T block_size = min( size, page_size - ((UINT_PTR)addr & page_mask) );
+                memcpy( buffer, addr, block_size );
+
+                addr   = (const void *)((const char *)addr + block_size);
+                buffer = (void *)((char *)buffer + block_size);
+                bytes_read += block_size;
+            }
+        }
+    }
+    server_leave_uninterrupted_section( &csVirtual, &sigset );
+    return bytes_read;
+}
+
+
+/***********************************************************************
+ *           virtual_uninterrupted_write_memory
+ *
+ * Similar to NtWriteVirtualMemory, but without wineserver calls. Moreover
+ * permissions are checked before accessing each page, to ensure that no
+ * exceptions can happen.
+ */
+SIZE_T virtual_uninterrupted_write_memory( void *addr, const void *buffer, SIZE_T size )
+{
+    struct file_view *view;
+    sigset_t sigset;
+    SIZE_T bytes_written = 0;
+
+    if (!size) return 0;
+
+    server_enter_uninterrupted_section( &csVirtual, &sigset );
+    if ((view = VIRTUAL_FindView( addr, size )))
+    {
+        if (!(view->protect & VPROT_SYSTEM))
+        {
+            void *page = ROUND_ADDR( addr, page_mask );
+            BYTE *p = view->prot + (((const char *)page - (const char *)view->base) >> page_shift);
+
+            while (bytes_written < size && (VIRTUAL_GetUnixProt( *p++ ) & PROT_WRITE))
+            {
+                SIZE_T block_size = min( size, page_size - ((UINT_PTR)addr & page_mask) );
+                memcpy( addr, buffer, block_size );
+
+                addr   = (void *)((char *)addr + block_size);
+                buffer = (const void *)((const char *)buffer + block_size);
+                bytes_written += block_size;
+            }
+        }
+    }
+    server_leave_uninterrupted_section( &csVirtual, &sigset );
+    return bytes_written;
 }
 
 

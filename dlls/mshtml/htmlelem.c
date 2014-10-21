@@ -156,6 +156,89 @@ HRESULT replace_node_by_html(nsIDOMHTMLDocument *nsdoc, nsIDOMNode *nsnode, cons
     return hres;
 }
 
+nsresult get_elem_attr_value(nsIDOMHTMLElement *nselem, const WCHAR *name, nsAString *val_str, const PRUnichar **val)
+{
+    nsAString name_str;
+    nsresult nsres;
+
+    nsAString_InitDepend(&name_str, name);
+    nsAString_Init(val_str, NULL);
+    nsres = nsIDOMHTMLElement_GetAttribute(nselem, &name_str, val_str);
+    nsAString_Finish(&name_str);
+    if(NS_FAILED(nsres)) {
+        ERR("GetAttribute(%s) failed: %08x\n", debugstr_w(name), nsres);
+        nsAString_Finish(val_str);
+        return nsres;
+    }
+
+    nsAString_GetData(val_str, val);
+    return NS_OK;
+}
+
+HRESULT elem_string_attr_getter(HTMLElement *elem, const WCHAR *name, BOOL use_null, BSTR *p)
+{
+    const PRUnichar *val;
+    nsAString val_str;
+    nsresult nsres;
+    HRESULT hres = S_OK;
+
+    nsres = get_elem_attr_value(elem->nselem, name, &val_str, &val);
+    if(NS_FAILED(nsres))
+        return E_FAIL;
+
+    TRACE("%s: returning %s\n", debugstr_w(name), debugstr_w(val));
+
+    if(*val || !use_null) {
+        *p = SysAllocString(val);
+        if(!*p)
+            hres = E_OUTOFMEMORY;
+    }else {
+        *p = NULL;
+    }
+    nsAString_Finish(&val_str);
+    return hres;
+}
+
+HRESULT elem_string_attr_setter(HTMLElement *elem, const WCHAR *name, const WCHAR *value)
+{
+    nsAString name_str, val_str;
+    nsresult nsres;
+
+    nsAString_InitDepend(&name_str, name);
+    nsAString_InitDepend(&val_str, value);
+    nsres = nsIDOMHTMLElement_SetAttribute(elem->nselem, &name_str, &val_str);
+    nsAString_Finish(&name_str);
+    nsAString_Finish(&val_str);
+
+    if(NS_FAILED(nsres)) {
+        WARN("SetAttribute failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    return S_OK;
+}
+
+HRESULT get_readystate_string(READYSTATE readystate, BSTR *p)
+{
+    static const WCHAR uninitializedW[] = {'u','n','i','n','i','t','i','a','l','i','z','e','d',0};
+    static const WCHAR loadingW[] = {'l','o','a','d','i','n','g',0};
+    static const WCHAR loadedW[] = {'l','o','a','d','e','d',0};
+    static const WCHAR interactiveW[] = {'i','n','t','e','r','a','c','t','i','v','e',0};
+    static const WCHAR completeW[] = {'c','o','m','p','l','e','t','e',0};
+
+    static const LPCWSTR readystate_strs[] = {
+        uninitializedW,
+        loadingW,
+        loadedW,
+        interactiveW,
+        completeW
+    };
+
+    assert(readystate <= READYSTATE_COMPLETE);
+    *p = SysAllocString(readystate_strs[readystate]);
+    return *p ? S_OK : E_OUTOFMEMORY;
+}
+
 typedef struct
 {
     DispatchEx dispex;
@@ -754,18 +837,24 @@ static HRESULT WINAPI HTMLElement_get_title(IHTMLElement *iface, BSTR *p)
     return return_nsstr(nsres, &title_str, p);
 }
 
+static const WCHAR languageW[] = {'l','a','n','g','u','a','g','e',0};
+
 static HRESULT WINAPI HTMLElement_put_language(IHTMLElement *iface, BSTR v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    return elem_string_attr_setter(This, languageW, v);
 }
 
 static HRESULT WINAPI HTMLElement_get_language(IHTMLElement *iface, BSTR *p)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return elem_string_attr_getter(This, languageW, TRUE, p);
 }
 
 static HRESULT WINAPI HTMLElement_put_onselectstart(IHTMLElement *iface, VARIANT v)
@@ -789,30 +878,53 @@ static HRESULT WINAPI HTMLElement_get_onselectstart(IHTMLElement *iface, VARIANT
 static HRESULT WINAPI HTMLElement_scrollIntoView(IHTMLElement *iface, VARIANT varargStart)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_variant(&varargStart));
-    return E_NOTIMPL;
+    cpp_bool start = TRUE;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&varargStart));
+
+    switch(V_VT(&varargStart)) {
+    case VT_EMPTY:
+    case VT_ERROR:
+	break;
+    case VT_BOOL:
+	start = V_BOOL(&varargStart) != VARIANT_FALSE;
+	break;
+    default:
+	FIXME("Unsupported argument %s\n", debugstr_variant(&varargStart));
+    }
+
+    if(!This->nselem) {
+	FIXME("Unsupported for comments\n");
+	return E_NOTIMPL;
+    }
+
+    nsres = nsIDOMHTMLElement_ScrollIntoView(This->nselem, start, 1);
+    assert(nsres == NS_OK);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLElement_contains(IHTMLElement *iface, IHTMLElement *pChild,
                                            VARIANT_BOOL *pfResult)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    HTMLElement *child;
-    cpp_bool result;
-    nsresult nsres;
+    cpp_bool result = FALSE;
 
     TRACE("(%p)->(%p %p)\n", This, pChild, pfResult);
 
-    child = unsafe_impl_from_IHTMLElement(pChild);
-    if(!child) {
-        ERR("not our element\n");
-        return E_FAIL;
-    }
+    if(pChild) {
+        HTMLElement *child;
+        nsresult nsres;
 
-    nsres = nsIDOMNode_Contains(This->node.nsnode, child->node.nsnode, &result);
-    if(NS_FAILED(nsres)) {
-        ERR("failed\n");
-        return E_FAIL;
+        child = unsafe_impl_from_IHTMLElement(pChild);
+        if(!child) {
+            ERR("not our element\n");
+            return E_FAIL;
+        }
+
+        nsres = nsIDOMNode_Contains(This->node.nsnode, child->node.nsnode, &result);
+        assert(nsres == NS_OK);
     }
 
     *pfResult = result ? VARIANT_TRUE : VARIANT_FALSE;
@@ -822,8 +934,10 @@ static HRESULT WINAPI HTMLElement_contains(IHTMLElement *iface, IHTMLElement *pC
 static HRESULT WINAPI HTMLElement_get_sourceIndex(IHTMLElement *iface, LONG *p)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_elem_source_index(This, p);
 }
 
 static HRESULT WINAPI HTMLElement_get_recordNumber(IHTMLElement *iface, VARIANT *p)

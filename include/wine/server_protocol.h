@@ -112,18 +112,6 @@ typedef union
         int          __pad;
         mod_handle_t base;
     } unload_dll;
-    struct
-    {
-        int          code;
-        data_size_t  length;
-        client_ptr_t string;
-    } output_string;
-    struct
-    {
-        int          code;
-        int          error;
-        int          type;
-    } rip_info;
 } debug_event_t;
 
 
@@ -2261,19 +2249,6 @@ struct get_exception_status_reply
 
 
 
-struct output_debug_string_request
-{
-    struct request_header __header;
-    data_size_t   length;
-    client_ptr_t  string;
-};
-struct output_debug_string_reply
-{
-    struct reply_header __header;
-};
-
-
-
 struct continue_debug_event_request
 {
     struct request_header __header;
@@ -3213,6 +3188,18 @@ struct get_named_pipe_info_reply
     unsigned int   insize;
 };
 
+
+struct set_named_pipe_info_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+    unsigned int   flags;
+    char __pad_20[4];
+};
+struct set_named_pipe_info_reply
+{
+    struct reply_header __header;
+};
 
 
 struct create_window_request
@@ -5184,7 +5171,6 @@ enum request
     REQ_wait_debug_event,
     REQ_queue_exception_event,
     REQ_get_exception_status,
-    REQ_output_debug_string,
     REQ_continue_debug_event,
     REQ_debug_process,
     REQ_debug_break,
@@ -5242,6 +5228,7 @@ enum request
     REQ_get_ioctl_result,
     REQ_create_named_pipe,
     REQ_get_named_pipe_info,
+    REQ_set_named_pipe_info,
     REQ_create_window,
     REQ_destroy_window,
     REQ_get_desktop_window,
@@ -5447,7 +5434,6 @@ union generic_request
     struct wait_debug_event_request wait_debug_event_request;
     struct queue_exception_event_request queue_exception_event_request;
     struct get_exception_status_request get_exception_status_request;
-    struct output_debug_string_request output_debug_string_request;
     struct continue_debug_event_request continue_debug_event_request;
     struct debug_process_request debug_process_request;
     struct debug_break_request debug_break_request;
@@ -5505,6 +5491,7 @@ union generic_request
     struct get_ioctl_result_request get_ioctl_result_request;
     struct create_named_pipe_request create_named_pipe_request;
     struct get_named_pipe_info_request get_named_pipe_info_request;
+    struct set_named_pipe_info_request set_named_pipe_info_request;
     struct create_window_request create_window_request;
     struct destroy_window_request destroy_window_request;
     struct get_desktop_window_request get_desktop_window_request;
@@ -5708,7 +5695,6 @@ union generic_reply
     struct wait_debug_event_reply wait_debug_event_reply;
     struct queue_exception_event_reply queue_exception_event_reply;
     struct get_exception_status_reply get_exception_status_reply;
-    struct output_debug_string_reply output_debug_string_reply;
     struct continue_debug_event_reply continue_debug_event_reply;
     struct debug_process_reply debug_process_reply;
     struct debug_break_reply debug_break_reply;
@@ -5766,6 +5752,7 @@ union generic_reply
     struct get_ioctl_result_reply get_ioctl_result_reply;
     struct create_named_pipe_reply create_named_pipe_reply;
     struct get_named_pipe_info_reply get_named_pipe_info_reply;
+    struct set_named_pipe_info_reply set_named_pipe_info_reply;
     struct create_window_reply create_window_reply;
     struct destroy_window_reply destroy_window_reply;
     struct get_desktop_window_reply get_desktop_window_reply;
@@ -5878,6 +5865,6 @@ union generic_reply
     struct get_device_name_reply get_device_name_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 455
+#define SERVER_PROTOCOL_VERSION 457
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

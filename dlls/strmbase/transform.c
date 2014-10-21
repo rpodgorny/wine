@@ -42,7 +42,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(strmbase);
 static const WCHAR wcsInputPinName[] = {'i','n','p','u','t',' ','p','i','n',0};
 static const WCHAR wcsOutputPinName[] = {'o','u','t','p','u','t',' ','p','i','n',0};
 
-static const IBaseFilterVtbl TransformFilter_Vtbl;
 static const IPinVtbl TransformFilter_InputPin_Vtbl;
 static const IPinVtbl TransformFilter_OutputPin_Vtbl;
 static const IQualityControlVtbl TransformFilter_QualityControl_Vtbl;
@@ -313,7 +312,7 @@ HRESULT WINAPI TransformFilterImpl_QueryInterface(IBaseFilter * iface, REFIID ri
 ULONG WINAPI TransformFilterImpl_Release(IBaseFilter * iface)
 {
     TransformFilter *This = impl_from_IBaseFilter(iface);
-    ULONG refCount = BaseFilterImpl_Release(iface);
+    ULONG refCount = InterlockedDecrement(&This->filter.refCount);
 
     TRACE("(%p/%p)->() Release from %d\n", This, iface, refCount + 1);
 
@@ -343,6 +342,7 @@ ULONG WINAPI TransformFilterImpl_Release(IBaseFilter * iface)
         FreeMediaType(&This->pmt);
         QualityControlImpl_Destroy(This->qcimpl);
         IUnknown_Release(This->seekthru_unk);
+        BaseFilter_Destroy(&This->filter);
         CoTaskMemFree(This);
 
         return 0;
@@ -437,25 +437,6 @@ HRESULT WINAPI TransformFilterImpl_FindPin(IBaseFilter * iface, LPCWSTR Id, IPin
 
     return E_NOTIMPL;
 }
-
-static const IBaseFilterVtbl TransformFilter_Vtbl =
-{
-    TransformFilterImpl_QueryInterface,
-    BaseFilterImpl_AddRef,
-    TransformFilterImpl_Release,
-    BaseFilterImpl_GetClassID,
-    TransformFilterImpl_Stop,
-    TransformFilterImpl_Pause,
-    TransformFilterImpl_Run,
-    BaseFilterImpl_GetState,
-    BaseFilterImpl_SetSyncSource,
-    BaseFilterImpl_GetSyncSource,
-    BaseFilterImpl_EnumPins,
-    TransformFilterImpl_FindPin,
-    BaseFilterImpl_QueryFilterInfo,
-    BaseFilterImpl_JoinFilterGraph,
-    BaseFilterImpl_QueryVendorInfo
-};
 
 static HRESULT WINAPI TransformFilter_InputPin_EndOfStream(IPin * iface)
 {

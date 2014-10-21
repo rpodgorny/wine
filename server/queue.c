@@ -25,6 +25,9 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef HAVE_POLL_H
+# include <poll.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -681,7 +684,11 @@ static struct message_result *alloc_message_result( struct msg_queue *send_queue
             result->callback_msg = callback_msg;
             list_add_head( &send_queue->callback_result, &result->sender_entry );
         }
-        else if (send_queue) list_add_head( &send_queue->send_result, &result->sender_entry );
+        else if (send_queue)
+        {
+            list_add_head( &send_queue->send_result, &result->sender_entry );
+            clear_queue_bits( send_queue, QS_SMRESULT );
+        }
 
         if (timeout != TIMEOUT_INFINITE)
             result->timeout = add_timeout_user( timeout, result_timeout, result );
@@ -1274,7 +1281,7 @@ static void update_input_key_state( struct desktop *desktop, unsigned char *keys
 
 /* release the hardware message currently being processed by the given thread */
 static void release_hardware_message( struct msg_queue *queue, unsigned int hw_id,
-                                      int remove, user_handle_t new_win )
+                                      int remove )
 {
     struct thread_input *input = queue->input;
     struct message *msg;
@@ -1286,7 +1293,7 @@ static void release_hardware_message( struct msg_queue *queue, unsigned int hw_i
     if (&msg->entry == &input->msg_list) return;  /* not found */
 
     /* clear the queue bit for that message */
-    if (remove || new_win)
+    if (remove)
     {
         struct message *other;
         int clr_bit;
@@ -1301,32 +1308,7 @@ static void release_hardware_message( struct msg_queue *queue, unsigned int hw_i
             }
         }
         if (clr_bit) clear_queue_bits( queue, clr_bit );
-    }
 
-    if (new_win)  /* set the new window */
-    {
-        struct thread *owner = get_window_thread( new_win );
-        if (owner)
-        {
-            msg->win = new_win;
-            if (owner->queue->input != input)
-            {
-                list_remove( &msg->entry );
-                if (merge_message( owner->queue->input, msg ))
-                {
-                    free_message( msg );
-                    release_object( owner );
-                    return;
-                }
-                list_add_tail( &owner->queue->input->msg_list, &msg->entry );
-            }
-            set_queue_bits( owner->queue, get_hardware_msg_bit( msg ));
-            remove = 0;
-            release_object( owner );
-        }
-    }
-    if (remove)
-    {
         update_input_key_state( input->desktop, input->keystate, msg );
         list_remove( &msg->entry );
         free_message( msg );
@@ -1372,11 +1354,13 @@ found:
 
 /* find the window that should receive a given hardware message */
 static user_handle_t find_hardware_message_window( struct desktop *desktop, struct thread_input *input,
-                                                   struct message *msg, unsigned int *msg_code )
+                                                   struct message *msg, unsigned int *msg_code,
+                                                   struct thread **thread )
 {
     struct hardware_msg_data *data = msg->data;
     user_handle_t win = 0;
 
+    *thread = NULL;
     *msg_code = msg->msg;
     if (msg->msg == WM_INPUT)
     {
@@ -1390,14 +1374,16 @@ static user_handle_t find_hardware_message_window( struct desktop *desktop, stru
             if (*msg_code < WM_SYSKEYDOWN) *msg_code += WM_SYSKEYDOWN - WM_KEYDOWN;
         }
     }
-    else  /* mouse message */
+    else if (!input || !(win = input->capture)) /* mouse message */
     {
-        if (!input || !(win = input->capture))
-        {
-            if (!(win = msg->win) || !is_window_visible( win ) || is_window_transparent( win ))
-                win = window_from_point( desktop, data->x, data->y );
-        }
+        if (is_window_visible( msg->win ) && !is_window_transparent( msg->win )) win = msg->win;
+        else win = shallow_window_from_point( desktop, data->x, data->y );
+
+        *thread = window_thread_from_point( win, data->x, data->y );
     }
+
+    if (!*thread)
+        *thread = get_window_thread( win );
     return win;
 }
 
@@ -1484,8 +1470,8 @@ static void queue_hardware_message( struct desktop *desktop, struct message *msg
     }
     else input = desktop->foreground_input;
 
-    win = find_hardware_message_window( desktop, input, msg, &msg_code );
-    if (!win || !(thread = get_window_thread(win)))
+    win = find_hardware_message_window( desktop, input, msg, &msg_code, &thread );
+    if (!win || !thread)
     {
         if (input) update_input_key_state( input->desktop, input->keystate, msg );
         free_message( msg );
@@ -1921,8 +1907,8 @@ static int get_hardware_message( struct thread *thread, unsigned int hw_id, user
         struct hardware_msg_data *data = msg->data;
 
         ptr = list_next( &input->msg_list, ptr );
-        win = find_hardware_message_window( input->desktop, input, msg, &msg_code );
-        if (!win || !(win_thread = get_window_thread( win )))
+        win = find_hardware_message_window( input->desktop, input, msg, &msg_code, &win_thread );
+        if (!win || !win_thread)
         {
             /* no window at all, remove it */
             update_input_key_state( input->desktop, input->keystate, msg );
@@ -1969,7 +1955,7 @@ static int get_hardware_message( struct thread *thread, unsigned int hw_id, user
         data->hw_id = msg->unique_id;
         set_reply_data( msg->data, msg->data_size );
         if (msg->msg == WM_INPUT && (flags & PM_REMOVE))
-            release_hardware_message( current->queue, data->hw_id, 1, 0 );
+            release_hardware_message( current->queue, data->hw_id, 1 );
         return 1;
     }
     /* nothing found, clear the hardware queue bits */
@@ -2460,7 +2446,7 @@ DECL_HANDLER(reply_message)
 DECL_HANDLER(accept_hardware_message)
 {
     if (current->queue)
-        release_hardware_message( current->queue, req->hw_id, req->remove, req->new_win );
+        release_hardware_message( current->queue, req->hw_id, req->remove );
     else
         set_error( STATUS_ACCESS_DENIED );
 }
@@ -2502,7 +2488,8 @@ DECL_HANDLER(get_message_reply)
             else
             {
                 result = LIST_ENTRY( entry, struct message_result, sender_entry );
-                if (!result->replied) clear_queue_bits( queue, QS_SMRESULT );
+                if (result->replied) set_queue_bits( queue, QS_SMRESULT );
+                else clear_queue_bits( queue, QS_SMRESULT );
             }
         }
     }

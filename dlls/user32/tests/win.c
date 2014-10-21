@@ -103,6 +103,22 @@ static void flush_events( BOOL remove_messages )
     }
 }
 
+static BOOL wait_for_event(HANDLE event, int timeout)
+{
+    DWORD end_time = GetTickCount() + timeout;
+    MSG msg;
+
+    do {
+        if(MsgWaitForMultipleObjects(1, &event, FALSE, timeout, QS_ALLINPUT) == WAIT_OBJECT_0)
+            return TRUE;
+        while(PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+            DispatchMessageA(&msg);
+        timeout = end_time - GetTickCount();
+    }while(timeout > 0);
+
+    return FALSE;
+}
+
 /* check the values returned by the various parent/owner functions on a given window */
 static void check_parents( HWND hwnd, HWND ga_parent, HWND gwl_parent, HWND get_parent,
                            HWND gw_owner, HWND ga_root, HWND ga_root_owner )
@@ -705,19 +721,12 @@ static LRESULT WINAPI main_window_procA(HWND hwnd, UINT msg, WPARAM wparam, LPAR
     {
 	case WM_GETMINMAXINFO:
 	{
-	    MINMAXINFO* minmax = (MINMAXINFO *)lparam;
-
-	    trace("WM_GETMINMAXINFO: hwnd %p, %08lx, %08lx\n", hwnd, wparam, lparam);
-            dump_minmax_info( minmax );
 	    SetWindowLongPtrA(hwnd, GWLP_USERDATA, 0x20031021);
 	    break;
 	}
 	case WM_WINDOWPOSCHANGING:
 	{
 	    WINDOWPOS *winpos = (WINDOWPOS *)lparam;
-	    trace("main: WM_WINDOWPOSCHANGING %p after %p, x %d, y %d, cx %d, cy %d flags %08x\n",
-		   winpos->hwnd, winpos->hwndInsertAfter,
-		   winpos->x, winpos->y, winpos->cx, winpos->cy, winpos->flags);
 	    if (!(winpos->flags & SWP_NOMOVE))
 	    {
 		ok(winpos->x >= -32768 && winpos->x <= 32767, "bad winpos->x %d\n", winpos->x);
@@ -739,9 +748,6 @@ static LRESULT WINAPI main_window_procA(HWND hwnd, UINT msg, WPARAM wparam, LPAR
 	{
             RECT rc1, rc2;
 	    WINDOWPOS *winpos = (WINDOWPOS *)lparam;
-	    trace("main: WM_WINDOWPOSCHANGED %p after %p, x %d, y %d, cx %d, cy %d flags %08x\n",
-		   winpos->hwnd, winpos->hwndInsertAfter,
-		   winpos->x, winpos->y, winpos->cx, winpos->cy, winpos->flags);
 	    ok(winpos->x >= -32768 && winpos->x <= 32767, "bad winpos->x %d\n", winpos->x);
 	    ok(winpos->y >= -32768 && winpos->y <= 32767, "bad winpos->y %d\n", winpos->y);
 
@@ -775,10 +781,6 @@ static LRESULT WINAPI main_window_procA(HWND hwnd, UINT msg, WPARAM wparam, LPAR
 	    BOOL got_getminmaxinfo = GetWindowLongPtrA(hwnd, GWLP_USERDATA) == 0x20031021;
 	    CREATESTRUCTA *cs = (CREATESTRUCTA *)lparam;
 
-            trace("WM_NCCREATE: hwnd %p, parent %p, style %08x\n", hwnd, cs->hwndParent, cs->style);
-	    if (got_getminmaxinfo)
-		trace("%p got WM_GETMINMAXINFO\n", hwnd);
-
 	    if ((cs->style & WS_THICKFRAME) || !(cs->style & (WS_POPUP | WS_CHILD)))
 		ok(got_getminmaxinfo, "main: WM_GETMINMAXINFO should have been received before WM_NCCREATE\n");
 	    else
@@ -803,10 +805,6 @@ static LRESULT WINAPI tool_window_procA(HWND hwnd, UINT msg, WPARAM wparam, LPAR
     {
 	case WM_GETMINMAXINFO:
 	{
-	    MINMAXINFO* minmax = (MINMAXINFO *)lparam;
-
-	    trace("hwnd %p, WM_GETMINMAXINFO, %08lx, %08lx\n", hwnd, wparam, lparam);
-            dump_minmax_info( minmax );
 	    SetWindowLongPtrA(hwnd, GWLP_USERDATA, 0x20031021);
 	    break;
 	}
@@ -814,10 +812,6 @@ static LRESULT WINAPI tool_window_procA(HWND hwnd, UINT msg, WPARAM wparam, LPAR
 	{
 	    BOOL got_getminmaxinfo = GetWindowLongPtrA(hwnd, GWLP_USERDATA) == 0x20031021;
 	    CREATESTRUCTA *cs = (CREATESTRUCTA *)lparam;
-
-            trace("WM_NCCREATE: hwnd %p, parent %p, style %08x\n", hwnd, cs->hwndParent, cs->style);
-	    if (got_getminmaxinfo)
-		trace("%p got WM_GETMINMAXINFO\n", hwnd);
 
 	    if ((cs->style & WS_THICKFRAME) || !(cs->style & (WS_POPUP | WS_CHILD)))
 		ok(got_getminmaxinfo, "tool: WM_GETMINMAXINFO should have been received before WM_NCCREATE\n");
@@ -1665,12 +1659,7 @@ static LRESULT WINAPI mdi_child_wnd_proc_1(HWND hwnd, UINT msg, WPARAM wparam, L
             style = GetWindowLongA(hwnd, GWL_STYLE);
             exstyle = GetWindowLongA(hwnd, GWL_EXSTYLE);
 
-            GetWindowRect(client, &rc);
-            trace("MDI client %p window size = (%d x %d)\n", client, rc.right-rc.left, rc.bottom-rc.top);
             GetClientRect(client, &rc);
-            trace("MDI client %p client size = (%d x %d)\n", client, rc.right, rc.bottom);
-            trace("screen size: %d x %d\n", GetSystemMetrics(SM_CXSCREEN),
-                                            GetSystemMetrics(SM_CYSCREEN));
 
             GetClientRect(client, &rc);
             if ((style & WS_CAPTION) == WS_CAPTION)
@@ -3765,6 +3754,11 @@ static void test_SetParent(void)
     bret = SetForegroundWindow(popup);
     ok(bret, "SetForegroundWindow() failed\n");
     check_active_state(popup, popup, popup);
+
+    ShowWindow(parent, SW_SHOW);
+    SetActiveWindow(popup);
+    ok(DestroyWindow(popup), "DestroyWindow() failed\n");
+    check_active_state(parent, parent, parent);
 
     ok(DestroyWindow(parent), "DestroyWindow() failed\n");
 
@@ -6293,7 +6287,6 @@ static LRESULT CALLBACK fullscreen_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPAR
         case WM_NCCREATE:
         {
             CREATESTRUCTA *cs = (CREATESTRUCTA *)lp;
-            trace("WM_NCCREATE: rect %d,%d-%d,%d\n", cs->x, cs->y, cs->cx, cs->cy);
             ok(cs->x == mi.rcMonitor.left && cs->y == mi.rcMonitor.top &&
                cs->cx == mi.rcMonitor.right && cs->cy == mi.rcMonitor.bottom,
                "expected %d,%d-%d,%d, got %d,%d-%d,%d\n",
@@ -6304,7 +6297,6 @@ static LRESULT CALLBACK fullscreen_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPAR
         case WM_GETMINMAXINFO:
         {
             MINMAXINFO *minmax = (MINMAXINFO *)lp;
-            dump_minmax_info(minmax);
             ok(minmax->ptMaxPosition.x <= mi.rcMonitor.left, "%d <= %d\n", minmax->ptMaxPosition.x, mi.rcMonitor.left);
             ok(minmax->ptMaxPosition.y <= mi.rcMonitor.top, "%d <= %d\n", minmax->ptMaxPosition.y, mi.rcMonitor.top);
             ok(minmax->ptMaxSize.x >= mi.rcMonitor.right, "%d >= %d\n", minmax->ptMaxSize.x, mi.rcMonitor.right);
@@ -7224,6 +7216,167 @@ todo_wine
     ok(ret, "UnregisterClass(my_window) failed\n");
 }
 
+static void simulate_click(int x, int y)
+{
+    INPUT input[2];
+    UINT events_no;
+
+    SetCursorPos(x, y);
+    memset(input, 0, sizeof(input));
+    input[0].type = INPUT_MOUSE;
+    U(input[0]).mi.dx = x;
+    U(input[0]).mi.dy = y;
+    U(input[0]).mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    input[1].type = INPUT_MOUSE;
+    U(input[1]).mi.dx = x;
+    U(input[1]).mi.dy = y;
+    U(input[1]).mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    events_no = SendInput(2, input, sizeof(input[0]));
+    ok(events_no == 2, "SendInput returned %d\n", events_no);
+}
+
+static WNDPROC def_static_proc;
+static BOOL got_hittest;
+static LRESULT WINAPI static_hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if(msg == WM_NCHITTEST)
+        got_hittest = TRUE;
+    if(msg == WM_LBUTTONDOWN)
+        ok(0, "unexpected call\n");
+
+    return def_static_proc(hwnd, msg, wp, lp);
+}
+
+static void window_from_point_proc(HWND parent)
+{
+    HANDLE start_event, end_event;
+    HANDLE win, child_static, child_button;
+    BOOL got_click;
+    DWORD ret;
+    POINT pt;
+    MSG msg;
+
+    start_event = OpenEventA(EVENT_ALL_ACCESS, FALSE, "test_wfp_start");
+    ok(start_event != 0, "OpenEvent failed\n");
+    end_event = OpenEventA(EVENT_ALL_ACCESS, FALSE, "test_wfp_end");
+    ok(end_event != 0, "OpenEvent failed\n");
+
+    child_static = CreateWindowExA(0, "static", "static", WS_CHILD | WS_VISIBLE,
+            0, 0, 100, 100, parent, 0, NULL, NULL);
+    ok(child_static != 0, "CreateWindowEx failed\n");
+    pt.x = pt.y = 150;
+    win = WindowFromPoint(pt);
+    ok(win == parent, "WindowFromPoint returned %p, expected %p\n", win, parent);
+
+    child_button = CreateWindowExA(0, "button", "button", WS_CHILD | WS_VISIBLE,
+            100, 0, 100, 100, parent, 0, NULL, NULL);
+    ok(child_button != 0, "CreateWindowEx failed\n");
+    pt.x = 250;
+    win = WindowFromPoint(pt);
+    ok(win == child_button, "WindowFromPoint returned %p, expected %p\n", win, child_button);
+
+    /* without this window simulate click test keeps sending WM_NCHITTEST
+     * message to child_static in an infinite loop */
+    win = CreateWindowExA(0, "button", "button", WS_CHILD | WS_VISIBLE,
+            0, 0, 100, 100, parent, 0, NULL, NULL);
+    ok(win != 0, "CreateWindowEx failed\n");
+    def_static_proc = (void*)SetWindowLongPtrA(child_static,
+            GWLP_WNDPROC, (LONG_PTR)static_hook_proc);
+    flush_events(TRUE);
+    SetEvent(start_event);
+
+    got_hittest = FALSE;
+    got_click = FALSE;
+    while(!got_click && wait_for_message(&msg)) {
+        if(msg.message == WM_LBUTTONUP) {
+            ok(msg.hwnd == win, "msg.hwnd = %p, expected %p\n", msg.hwnd, win);
+            got_click = TRUE;
+        }
+        DispatchMessageA(&msg);
+    }
+    ok(got_hittest, "transparent window didn't get WM_NCHITTEST message\n");
+    ok(got_click, "button under static window didn't get WM_LBUTTONUP\n");
+
+    ret = WaitForSingleObject(end_event, 5000);
+    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject returned %x\n", ret);
+
+    CloseHandle(start_event);
+    CloseHandle(end_event);
+}
+
+static void test_window_from_point(const char *argv0)
+{
+    HWND hwnd, child, win;
+    POINT pt;
+    PROCESS_INFORMATION info;
+    STARTUPINFOA startup;
+    char cmd[MAX_PATH];
+    HANDLE start_event, end_event;
+
+    hwnd = CreateWindowExA(0, "MainWindowClass", NULL, WS_POPUP | WS_VISIBLE,
+            100, 100, 200, 100, 0, 0, NULL, NULL);
+    ok(hwnd != 0, "CreateWindowEx failed\n");
+
+    pt.x = pt.y = 150;
+    win = WindowFromPoint(pt);
+    pt.x = 250;
+    if(win == hwnd)
+        win = WindowFromPoint(pt);
+    if(win != hwnd) {
+        skip("there's another window covering test window\n");
+        DestroyWindow(hwnd);
+        return;
+    }
+
+    child = CreateWindowExA(0, "static", "static", WS_CHILD | WS_VISIBLE,
+            0, 0, 100, 100, hwnd, 0, NULL, NULL);
+    ok(child != 0, "CreateWindowEx failed\n");
+    pt.x = pt.y = 150;
+    win = WindowFromPoint(pt);
+    ok(win == hwnd, "WindowFromPoint returned %p, expected %p\n", win, hwnd);
+    DestroyWindow(child);
+
+    child = CreateWindowExA(0, "button", "button", WS_CHILD | WS_VISIBLE,
+                0, 0, 100, 100, hwnd, 0, NULL, NULL);
+    ok(child != 0, "CreateWindowEx failed\n");
+    win = WindowFromPoint(pt);
+    ok(win == child, "WindowFromPoint returned %p, expected %p\n", win, child);
+    DestroyWindow(child);
+
+    start_event = CreateEventA(NULL, FALSE, FALSE, "test_wfp_start");
+    ok(start_event != 0, "CreateEvent failed\n");
+    end_event = CreateEventA(NULL, FALSE, FALSE, "test_wfp_end");
+    ok(start_event != 0, "CreateEvent failed\n");
+
+    sprintf(cmd, "%s win create_children %p\n", argv0, hwnd);
+    memset(&startup, 0, sizeof(startup));
+    startup.cb = sizeof(startup);
+    ok(CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL,
+                &startup, &info), "CreateProcess failed.\n");
+    ok(wait_for_event(start_event, 1000), "didn't get start_event\n");
+
+    child = GetWindow(hwnd, GW_CHILD);
+    win = WindowFromPoint(pt);
+    ok(win == child, "WindowFromPoint returned %p, expected %p\n", win, child);
+
+    simulate_click(150, 150);
+    flush_events(TRUE);
+
+    child = GetWindow(child, GW_HWNDNEXT);
+    pt.x = 250;
+    win = WindowFromPoint(pt);
+    ok(win == child, "WindowFromPoint returned %p, expected %p\n", win, child);
+
+    SetEvent(end_event);
+    winetest_wait_child_process(info.hProcess);
+    CloseHandle(start_event);
+    CloseHandle(end_event);
+    CloseHandle(info.hProcess);
+    CloseHandle(info.hThread);
+
+    DestroyWindow(hwnd);
+}
+
 static void test_map_points(void)
 {
     BOOL ret;
@@ -7533,8 +7686,174 @@ static void test_window_without_child_style(void)
     DestroyWindow(hwnd);
 }
 
+
+struct smresult_thread_data
+{
+    HWND main_hwnd;
+    HWND thread_hwnd;
+    HANDLE thread_started;
+    HANDLE thread_got_wm_app;
+    HANDLE main_in_wm_app_1;
+    HANDLE thread_replied;
+};
+
+
+static LRESULT WINAPI smresult_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    switch (msg)
+    {
+    case WM_APP:
+    {
+        struct smresult_thread_data *data = (struct smresult_thread_data*)lparam;
+
+        ok(hwnd == data->thread_hwnd, "unexpected hwnd %p\n", hwnd);
+
+        SendNotifyMessageA(data->main_hwnd, WM_APP+1, 0, lparam);
+
+        /* Don't return until the main thread is processing our sent message. */
+        ok(WaitForSingleObject(data->main_in_wm_app_1, INFINITE) == WAIT_OBJECT_0, "WaitForSingleObject failed\n");
+
+        /* Break the PeekMessage loop so we can notify the main thread after we return. */
+        SetEvent(data->thread_got_wm_app);
+
+        return 0x240408ea;
+    }
+    case WM_APP+1:
+    {
+        struct smresult_thread_data *data = (struct smresult_thread_data*)lparam;
+        LRESULT res;
+
+        ok(hwnd == data->main_hwnd, "unexpected hwnd %p\n", hwnd);
+
+        /* Ask the thread to reply to our WM_APP message. */
+        SetEvent(data->main_in_wm_app_1);
+
+        /* Wait until the thread has sent a reply. */
+        ok(WaitForSingleObject(data->thread_replied, INFINITE) == WAIT_OBJECT_0, "WaitForSingleObject failed\n");
+
+        /* Send another message while we have a reply queued for the current one. */
+        res = SendMessageA(data->thread_hwnd, WM_APP+2, 0, lparam);
+        ok(res == 0x449b0190, "unexpected result %lx\n", res);
+
+        return 0;
+    }
+    case WM_APP+2:
+    {
+        struct smresult_thread_data *data = (struct smresult_thread_data*)lparam;
+
+        ok(hwnd == data->thread_hwnd, "unexpected hwnd %p\n", hwnd);
+
+        /* Don't return until we know the main thread is processing sent messages. */
+        SendMessageA(data->main_hwnd, WM_NULL, 0, 0);
+
+        return 0x449b0190;
+    }
+    case WM_CLOSE:
+        PostQuitMessage(0);
+        break;
+    }
+    return DefWindowProcA(hwnd, msg, wparam, lparam);
+}
+
+static DWORD WINAPI smresult_thread_proc(void *param)
+{
+    MSG msg;
+    struct smresult_thread_data *data = param;
+
+    data->thread_hwnd = CreateWindowExA(0, "SmresultClass", "window caption text", WS_OVERLAPPEDWINDOW,
+                                      100, 100, 200, 200, 0, 0, 0, NULL);
+    ok(data->thread_hwnd != 0, "Failed to create overlapped window\n");
+
+    SetEvent(data->thread_started);
+
+    /* Loop until we've processed WM_APP. */
+    while (WaitForSingleObject(data->thread_got_wm_app, 0) != WAIT_OBJECT_0)
+    {
+        if (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+        {
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+        }
+        else
+        {
+            MsgWaitForMultipleObjects(1, &data->thread_got_wm_app, FALSE, INFINITE, QS_SENDMESSAGE);
+        }
+    }
+
+    /* Notify the main thread that we replied to its WM_APP message. */
+    SetEvent(data->thread_replied);
+
+    while (GetMessageA(&msg, 0, 0, 0))
+    {
+        TranslateMessage(&msg);
+        DispatchMessageA(&msg);
+    }
+
+    return 0;
+}
+
+static void test_smresult(void)
+{
+    WNDCLASSA cls;
+    HANDLE hThread;
+    DWORD tid;
+    struct smresult_thread_data data;
+    BOOL ret;
+    LRESULT res;
+
+    cls.style = CS_DBLCLKS;
+    cls.lpfnWndProc = smresult_wndproc;
+    cls.cbClsExtra = 0;
+    cls.cbWndExtra = 0;
+    cls.hInstance = GetModuleHandleA(0);
+    cls.hIcon = 0;
+    cls.hCursor = LoadCursorA(0, (LPCSTR)IDC_ARROW);
+    cls.hbrBackground = GetStockObject(WHITE_BRUSH);
+    cls.lpszMenuName = NULL;
+    cls.lpszClassName = "SmresultClass";
+
+    ret = RegisterClassA(&cls);
+    ok(ret, "RegisterClassA failed\n");
+
+    data.thread_started = CreateEventA(NULL, TRUE, FALSE, NULL);
+    ok(data.thread_started != NULL, "CreateEventA failed\n");
+
+    data.thread_got_wm_app = CreateEventA(NULL, TRUE, FALSE, NULL);
+    ok(data.thread_got_wm_app != NULL, "CreateEventA failed\n");
+
+    data.main_in_wm_app_1 = CreateEventA(NULL, TRUE, FALSE, NULL);
+    ok(data.main_in_wm_app_1 != NULL, "CreateEventA failed\n");
+
+    data.thread_replied = CreateEventA(NULL, TRUE, FALSE, NULL);
+    ok(data.thread_replied != NULL, "CreateEventA failed\n");
+
+    data.main_hwnd = CreateWindowExA(0, "SmresultClass", "window caption text", WS_OVERLAPPEDWINDOW,
+                                      100, 100, 200, 200, 0, 0, 0, NULL);
+
+    hThread = CreateThread(NULL, 0, smresult_thread_proc, &data, 0, &tid);
+    ok(hThread != NULL, "CreateThread failed, error %d\n", GetLastError());
+
+    ok(WaitForSingleObject(data.thread_started, INFINITE) == WAIT_OBJECT_0, "WaitForSingleObject failed\n");
+
+    res = SendMessageA(data.thread_hwnd, WM_APP, 0, (LPARAM)&data);
+    ok(res == 0x240408ea, "unexpected result %lx\n", res);
+
+    SendMessageA(data.thread_hwnd, WM_CLOSE, 0, 0);
+
+    DestroyWindow(data.main_hwnd);
+
+    ok(WaitForSingleObject(hThread, INFINITE) == WAIT_OBJECT_0, "WaitForSingleObject failed\n");
+
+    CloseHandle(data.thread_started);
+    CloseHandle(data.thread_got_wm_app);
+    CloseHandle(data.main_in_wm_app_1);
+    CloseHandle(data.thread_replied);
+}
+
 START_TEST(win)
 {
+    char **argv;
+    int argc = winetest_get_mainargs( &argv );
     HMODULE user32 = GetModuleHandleA( "user32.dll" );
     HMODULE gdi32 = GetModuleHandleA("gdi32.dll");
     pGetAncestor = (void *)GetProcAddress( user32, "GetAncestor" );
@@ -7555,6 +7874,15 @@ START_TEST(win)
     pSetLayout = (void *)GetProcAddress( gdi32, "SetLayout" );
     pMirrorRgn = (void *)GetProcAddress( gdi32, "MirrorRgn" );
 
+    if (argc==4 && !strcmp(argv[2], "create_children"))
+    {
+        HWND hwnd;
+
+        sscanf(argv[3], "%p", &hwnd);
+        window_from_point_proc(hwnd);
+        return;
+    }
+
     if (!RegisterWindowClasses()) assert(0);
 
     hwndMain = CreateWindowExA(/*WS_EX_TOOLWINDOW*/ 0, "MainWindowClass", "Main window",
@@ -7566,20 +7894,7 @@ START_TEST(win)
 
     if(!SetForegroundWindow(hwndMain)) {
         /* workaround for foreground lock timeout */
-        INPUT input[2];
-        UINT events_no;
-
-        memset(input, 0, sizeof(input));
-        input[0].type = INPUT_MOUSE;
-        U(input[0]).mi.dx = 101;
-        U(input[0]).mi.dy = 101;
-        U(input[0]).mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-        input[0].type = INPUT_MOUSE;
-        U(input[0]).mi.dx = 101;
-        U(input[0]).mi.dy = 101;
-        U(input[0]).mi.dwFlags = MOUSEEVENTF_LEFTUP;
-        events_no = SendInput(2, input, sizeof(input[0]));
-        ok(events_no == 2, "SendInput returned %d\n", events_no);
+        simulate_click(101, 101);
         ok(SetForegroundWindow(hwndMain), "SetForegroundWindow failed\n");
     }
 
@@ -7605,6 +7920,7 @@ START_TEST(win)
 
     /* Add the tests below this line */
     test_child_window_from_point();
+    test_window_from_point(argv[0]);
     test_thick_child_size(hwndMain);
     test_fullscreen();
     test_hwnd_message();
@@ -7664,6 +7980,7 @@ START_TEST(win)
     test_map_points();
     test_update_region();
     test_window_without_child_style();
+    test_smresult();
 
     /* add the tests above this line */
     if (hhook) UnhookWindowsHookEx(hhook);

@@ -35,6 +35,7 @@
 #include "optary.h"
 #include "rpcproxy.h"
 #include "shlguid.h"
+#include "mlang.h"
 
 #include "wine/debug.h"
 
@@ -50,6 +51,35 @@ DWORD mshtml_tls = TLS_OUT_OF_INDEXES;
 static HINSTANCE shdoclc = NULL;
 static HDC display_dc;
 static WCHAR *status_strings[IDS_STATUS_LAST-IDS_STATUS_FIRST+1];
+static IMultiLanguage2 *mlang;
+
+UINT cp_from_charset_string(BSTR charset)
+{
+    MIMECSETINFO info;
+    HRESULT hres;
+
+    if(!mlang) {
+        IMultiLanguage2 *new_mlang;
+
+        hres = CoCreateInstance(&CLSID_CMultiLanguage, NULL, CLSCTX_INPROC_SERVER,
+                &IID_IMultiLanguage2, (void**)&new_mlang);
+        if(FAILED(hres)) {
+            ERR("Could not create CMultiLanguage instance\n");
+            return CP_UTF8;
+        }
+
+        if(InterlockedCompareExchangePointer((void**)&mlang, new_mlang, NULL))
+            IMultiLanguage2_Release(new_mlang);
+    }
+
+    hres = IMultiLanguage2_GetCharsetInfo(mlang, charset, &info);
+    if(FAILED(hres)) {
+        FIXME("GetCharsetInfo failed: %08x\n", hres);
+        return CP_UTF8;
+    }
+
+    return info.uiInternetEncoding;
+}
 
 static void thread_detach(void)
 {
@@ -83,6 +113,8 @@ static void process_detach(void)
         TlsFree(mshtml_tls);
     if(display_dc)
         DeleteObject(display_dc);
+    if(mlang)
+        IMultiLanguage2_Release(mlang);
 
     free_strings();
 }
@@ -501,41 +533,9 @@ HRESULT WINAPI DllUnregisterServer(void)
     return hres;
 }
 
-const char *debugstr_variant(const VARIANT *v)
-{
-    if(!v)
-        return "(null)";
-
-    switch(V_VT(v)) {
-    case VT_EMPTY:
-        return "{VT_EMPTY}";
-    case VT_NULL:
-        return "{VT_NULL}";
-    case VT_I2:
-        return wine_dbg_sprintf("{VT_I2: %d}", V_I2(v));
-    case VT_I4:
-        return wine_dbg_sprintf("{VT_I4: %d}", V_I4(v));
-    case VT_R8:
-        return wine_dbg_sprintf("{VT_R8: %lf}", V_R8(v));
-    case VT_BSTR:
-        return wine_dbg_sprintf("{VT_BSTR: %s}", debugstr_w(V_BSTR(v)));
-    case VT_DISPATCH:
-        return wine_dbg_sprintf("{VT_DISPATCH: %p}", V_DISPATCH(v));
-    case VT_ERROR:
-        return wine_dbg_sprintf("{VT_ERROR: %08x}", V_ERROR(v));
-    case VT_BOOL:
-        return wine_dbg_sprintf("{VT_BOOL: %x}", V_BOOL(v));
-    case VT_UINT:
-        return wine_dbg_sprintf("{VT_UINT: %u}", V_UINT(v));
-    default:
-        return wine_dbg_sprintf("{vt %d}", V_VT(v));
-    }
-}
-
 const char *debugstr_mshtml_guid(const GUID *iid)
 {
 #define X(x) if(IsEqualGUID(iid, &x)) return #x
-    X(DIID_DispHTMLDocument);
     X(DIID_HTMLDocumentEvents);
     X(DIID_HTMLDocumentEvents2);
     X(DIID_HTMLTableEvents);
@@ -548,53 +548,10 @@ const char *debugstr_mshtml_guid(const GUID *iid)
     X(IID_IEnumConnections);
     X(IID_IEnumVARIANT);
     X(IID_IHlinkTarget);
-    X(IID_IHTMLAttributeCollection);
-    X(IID_IHTMLAttributeCollection2);
-    X(IID_IHTMLAttributeCollection3);
-    X(IID_IHTMLCurrentStyle);
-    X(IID_IHTMLCurrentStyle2);
-    X(IID_IHTMLCurrentStyle3);
-    X(IID_IHTMLCurrentStyle4);
-    X(IID_IHTMLDocument);
-    X(IID_IHTMLDocument2);
-    X(IID_IHTMLDocument3);
-    X(IID_IHTMLDocument4);
-    X(IID_IHTMLDocument5);
     X(IID_IHTMLDocument6);
     X(IID_IHTMLDocument7);
-    X(IID_IHTMLDOMAttribute);
-    X(IID_IHTMLDOMChildrenCollection);
-    X(IID_IHTMLDOMNode);
-    X(IID_IHTMLDOMNode2);
-    X(IID_IHTMLElement);
-    X(IID_IHTMLElement2);
-    X(IID_IHTMLElement3);
-    X(IID_IHTMLElement4);
-    X(IID_IHTMLElementCollection);
-    X(IID_IHTMLEventObj);
-    X(IID_IHTMLFiltersCollection);
     X(IID_IHTMLFramesCollection2);
-    X(IID_IHTMLImageElementFactory);
-    X(IID_IHTMLLocation);
-    X(IID_IHTMLOptionElementFactory);
     X(IID_IHTMLPrivateWindow);
-    X(IID_IHTMLRect);
-    X(IID_IHTMLScreen);
-    X(IID_IHTMLStorage);
-    X(IID_IHTMLStyle);
-    X(IID_IHTMLStyle2);
-    X(IID_IHTMLStyle3);
-    X(IID_IHTMLStyle4);
-    X(IID_IHTMLStyle5);
-    X(IID_IHTMLStyle6);
-    X(IID_IHTMLStyleSheet);
-    X(IID_IHTMLStyleSheetRulesCollection);
-    X(IID_IHTMLStyleSheetsCollection);
-    X(IID_IHTMLWindow2);
-    X(IID_IHTMLWindow3);
-    X(IID_IHTMLWindow4);
-    X(IID_IHTMLWindow5);
-    X(IID_IHTMLWindow6);
     X(IID_IHtmlLoadOptions);
     X(IID_IInternetHostSecurityManager);
     X(IID_IMonikerProp);
@@ -631,6 +588,11 @@ const char *debugstr_mshtml_guid(const GUID *iid)
     X(IID_IViewObjectEx);
     X(IID_nsCycleCollectionISupports);
     X(IID_nsXPCOMCycleCollectionParticipant);
+#define XIID(x) X(IID_##x);
+#define XDIID(x) X(DIID_##x);
+    TID_LIST
+#undef XIID
+#undef XDIID
 #undef X
 
     return debugstr_guid(iid);

@@ -25,24 +25,56 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "dwrite.h"
 #include "dwrite_private.h"
 
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dwrite);
 
+struct gdiinterop {
+    IDWriteGdiInterop IDWriteGdiInterop_iface;
+    IDWriteFactory *factory;
+};
+
 struct rendertarget {
     IDWriteBitmapRenderTarget IDWriteBitmapRenderTarget_iface;
     LONG ref;
 
+    DWRITE_MATRIX m;
     SIZE size;
     HDC hdc;
 };
 
+static HRESULT create_target_dibsection(HDC hdc, UINT32 width, UINT32 height)
+{
+    char bmibuf[FIELD_OFFSET(BITMAPINFO, bmiColors[256])];
+    BITMAPINFO *bmi = (BITMAPINFO*)bmibuf;
+    HBITMAP hbm;
+
+    memset(bmi, 0, sizeof(bmibuf));
+    bmi->bmiHeader.biSize = sizeof(bmi->bmiHeader);
+    bmi->bmiHeader.biHeight = height;
+    bmi->bmiHeader.biWidth = width;
+    bmi->bmiHeader.biBitCount = 32;
+    bmi->bmiHeader.biPlanes = 1;
+    bmi->bmiHeader.biCompression = BI_RGB;
+
+    hbm = CreateDIBSection(hdc, bmi, DIB_RGB_COLORS, NULL, NULL, 0);
+    if (!hbm)
+        hbm = CreateBitmap(1, 1, 1, 1, NULL);
+
+    DeleteObject(SelectObject(hdc, hbm));
+    return S_OK;
+}
+
 static inline struct rendertarget *impl_from_IDWriteBitmapRenderTarget(IDWriteBitmapRenderTarget *iface)
 {
     return CONTAINING_RECORD(iface, struct rendertarget, IDWriteBitmapRenderTarget_iface);
+}
+
+static inline struct gdiinterop *impl_from_IDWriteGdiInterop(IDWriteGdiInterop *iface)
+{
+    return CONTAINING_RECORD(iface, struct gdiinterop, IDWriteGdiInterop_iface);
 }
 
 static HRESULT WINAPI rendertarget_QueryInterface(IDWriteBitmapRenderTarget *iface, REFIID riid, void **obj)
@@ -122,8 +154,11 @@ static HRESULT WINAPI rendertarget_SetPixelsPerDip(IDWriteBitmapRenderTarget *if
 static HRESULT WINAPI rendertarget_GetCurrentTransform(IDWriteBitmapRenderTarget *iface, DWRITE_MATRIX *transform)
 {
     struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget(iface);
-    FIXME("(%p)->(%p): stub\n", This, transform);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, transform);
+
+    *transform = This->m;
+    return S_OK;
 }
 
 static HRESULT WINAPI rendertarget_SetCurrentTransform(IDWriteBitmapRenderTarget *iface, DWRITE_MATRIX const *transform)
@@ -145,8 +180,13 @@ static HRESULT WINAPI rendertarget_GetSize(IDWriteBitmapRenderTarget *iface, SIZ
 static HRESULT WINAPI rendertarget_Resize(IDWriteBitmapRenderTarget *iface, UINT32 width, UINT32 height)
 {
     struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget(iface);
-    FIXME("(%p)->(%u %u): stub\n", This, width, height);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%u %u)\n", This, width, height);
+
+    if (This->size.cx == width && This->size.cy == height)
+        return S_OK;
+
+    return create_target_dibsection(This->hdc, width, height);
 }
 
 static const IDWriteBitmapRenderTargetVtbl rendertargetvtbl = {
@@ -163,102 +203,166 @@ static const IDWriteBitmapRenderTargetVtbl rendertargetvtbl = {
     rendertarget_Resize
 };
 
-static HRESULT create_rendertarget(HDC hdc, UINT32 width, UINT32 height, IDWriteBitmapRenderTarget **target)
+static HRESULT create_rendertarget(HDC hdc, UINT32 width, UINT32 height, IDWriteBitmapRenderTarget **ret)
 {
-    char bmibuf[FIELD_OFFSET(BITMAPINFO, bmiColors[256])];
-    BITMAPINFO *bmi = (BITMAPINFO*)bmibuf;
-    struct rendertarget *This;
-    HBITMAP dib;
+    struct rendertarget *target;
+    HRESULT hr;
 
-    *target = NULL;
+    *ret = NULL;
 
-    This = heap_alloc(sizeof(struct rendertarget));
-    if (!This) return E_OUTOFMEMORY;
+    target = heap_alloc(sizeof(struct rendertarget));
+    if (!target) return E_OUTOFMEMORY;
 
-    This->IDWriteBitmapRenderTarget_iface.lpVtbl = &rendertargetvtbl;
-    This->ref = 1;
+    target->IDWriteBitmapRenderTarget_iface.lpVtbl = &rendertargetvtbl;
+    target->ref = 1;
 
-    This->size.cx = width;
-    This->size.cy = height;
+    target->size.cx = width;
+    target->size.cy = height;
 
-    This->hdc = CreateCompatibleDC(hdc);
+    target->hdc = CreateCompatibleDC(hdc);
+    hr = create_target_dibsection(target->hdc, width, height);
+    if (FAILED(hr)) {
+        IDWriteBitmapRenderTarget_Release(&target->IDWriteBitmapRenderTarget_iface);
+        return hr;
+    }
 
-    memset(bmi, 0, sizeof(bmibuf));
-    bmi->bmiHeader.biSize = sizeof(bmi->bmiHeader);
-    bmi->bmiHeader.biHeight = height;
-    bmi->bmiHeader.biWidth = width;
-    bmi->bmiHeader.biBitCount = 32;
-    bmi->bmiHeader.biPlanes = 1;
-    bmi->bmiHeader.biCompression = BI_RGB;
+    target->m.m11 = target->m.m22 = 1.0;
+    target->m.m12 = target->m.m21 = 0.0;
+    target->m.dx  = target->m.dy  = 0.0;
 
-    dib = CreateDIBSection(This->hdc, bmi, DIB_RGB_COLORS, NULL, NULL, 0);
-    SelectObject(This->hdc, dib);
-
-    *target = &This->IDWriteBitmapRenderTarget_iface;
+    *ret = &target->IDWriteBitmapRenderTarget_iface;
 
     return S_OK;
 }
 
 static HRESULT WINAPI gdiinterop_QueryInterface(IDWriteGdiInterop *iface, REFIID riid, void **obj)
 {
-    TRACE("(%s %p)\n", debugstr_guid(riid), obj);
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
 
-    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDWriteGdiInterop))
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), obj);
+
+    if (IsEqualIID(riid, &IID_IDWriteGdiInterop) ||
+        IsEqualIID(riid, &IID_IUnknown))
     {
         *obj = iface;
+        IDWriteGdiInterop_AddRef(iface);
         return S_OK;
     }
 
     *obj = NULL;
-
     return E_NOINTERFACE;
 }
 
 static ULONG WINAPI gdiinterop_AddRef(IDWriteGdiInterop *iface)
 {
-    return 2;
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
+    TRACE("(%p)\n", This);
+    return IDWriteFactory_AddRef(This->factory);
 }
 
 static ULONG WINAPI gdiinterop_Release(IDWriteGdiInterop *iface)
 {
-    return 1;
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
+    TRACE("(%p)\n", This);
+    return IDWriteFactory_Release(This->factory);
 }
 
 static HRESULT WINAPI gdiinterop_CreateFontFromLOGFONT(IDWriteGdiInterop *iface,
     LOGFONTW const *logfont, IDWriteFont **font)
 {
-    TRACE("(%p %p)\n", logfont, font);
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
+    IDWriteFontCollection *collection;
+    IDWriteFontFamily *family;
+    DWRITE_FONT_STYLE style;
+    BOOL exists = FALSE;
+    UINT32 index;
+    HRESULT hr;
+
+    TRACE("(%p)->(%p %p)\n", This, logfont, font);
+
+    *font = NULL;
 
     if (!logfont) return E_INVALIDARG;
 
-    return create_font_from_logfont(logfont, font);
+    hr = IDWriteFactory_GetSystemFontCollection(This->factory, &collection, FALSE);
+    if (FAILED(hr)) {
+        ERR("failed to get system font collection: 0x%08x.\n", hr);
+        return hr;
+    }
+
+    hr = IDWriteFontCollection_FindFamilyName(collection, logfont->lfFaceName, &index, &exists);
+    if (FAILED(hr)) {
+        IDWriteFontCollection_Release(collection);
+        goto done;
+    }
+
+    if (!exists) {
+        hr = DWRITE_E_NOFONT;
+        goto done;
+    }
+
+    hr = IDWriteFontCollection_GetFontFamily(collection, index, &family);
+    if (FAILED(hr))
+        goto done;
+
+    style = logfont->lfItalic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL;
+    hr = IDWriteFontFamily_GetFirstMatchingFont(family, logfont->lfWeight, DWRITE_FONT_STRETCH_NORMAL, style, font);
+    IDWriteFontFamily_Release(family);
+
+done:
+    IDWriteFontCollection_Release(collection);
+    return hr;
 }
 
 static HRESULT WINAPI gdiinterop_ConvertFontToLOGFONT(IDWriteGdiInterop *iface,
     IDWriteFont *font, LOGFONTW *logfont, BOOL *is_systemfont)
 {
-    FIXME("(%p %p %p): stub\n", font, logfont, is_systemfont);
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
+    FIXME("(%p)->(%p %p %p): stub\n", This, font, logfont, is_systemfont);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI gdiinterop_ConvertFontFaceToLOGFONT(IDWriteGdiInterop *iface,
     IDWriteFontFace *fontface, LOGFONTW *logfont)
 {
-    TRACE("(%p %p)\n", fontface, logfont);
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
+    TRACE("(%p)->(%p %p)\n", This, fontface, logfont);
     return convert_fontface_to_logfont(fontface, logfont);
 }
 
 static HRESULT WINAPI gdiinterop_CreateFontFaceFromHdc(IDWriteGdiInterop *iface,
     HDC hdc, IDWriteFontFace **fontface)
 {
-    FIXME("(%p %p): stub\n", hdc, fontface);
-    return E_NOTIMPL;
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
+    IDWriteFont *font;
+    LOGFONTW logfont;
+    HFONT hfont;
+    HRESULT hr;
+
+    TRACE("(%p)->(%p %p)\n", This, hdc, fontface);
+
+    *fontface = NULL;
+
+    hfont = GetCurrentObject(hdc, OBJ_FONT);
+    if (!hfont)
+        return E_INVALIDARG;
+    GetObjectW(hfont, sizeof(logfont), &logfont);
+
+    hr = IDWriteGdiInterop_CreateFontFromLOGFONT(iface, &logfont, &font);
+    if (FAILED(hr))
+        return hr;
+
+    hr = IDWriteFont_CreateFontFace(font, fontface);
+    IDWriteFont_Release(font);
+
+    return hr;
 }
 
 static HRESULT WINAPI gdiinterop_CreateBitmapRenderTarget(IDWriteGdiInterop *iface,
     HDC hdc, UINT32 width, UINT32 height, IDWriteBitmapRenderTarget **target)
 {
-    TRACE("(%p %u %u %p)\n", hdc, width, height, target);
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
+    TRACE("(%p)->(%p %u %u %p)\n", This, hdc, width, height, target);
     return create_rendertarget(hdc, width, height, target);
 }
 
@@ -273,10 +377,24 @@ static const struct IDWriteGdiInteropVtbl gdiinteropvtbl = {
     gdiinterop_CreateBitmapRenderTarget
 };
 
-static IDWriteGdiInterop gdiinterop = { &gdiinteropvtbl };
-
-HRESULT get_gdiinterop(IDWriteGdiInterop **ret)
+HRESULT create_gdiinterop(IDWriteFactory *factory, IDWriteGdiInterop **ret)
 {
-    *ret = &gdiinterop;
+    struct gdiinterop *This;
+
+    *ret = NULL;
+
+    This = heap_alloc(sizeof(struct gdiinterop));
+    if (!This) return E_OUTOFMEMORY;
+
+    This->IDWriteGdiInterop_iface.lpVtbl = &gdiinteropvtbl;
+    This->factory = factory;
+
+    *ret= &This->IDWriteGdiInterop_iface;
     return S_OK;
+}
+
+void release_gdiinterop(IDWriteGdiInterop *iface)
+{
+    struct gdiinterop *interop = impl_from_IDWriteGdiInterop(iface);
+    heap_free(interop);
 }

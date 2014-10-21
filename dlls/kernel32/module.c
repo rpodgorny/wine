@@ -339,6 +339,9 @@ void MODULE_get_binary_info( HANDLE hfile, struct binary_info *info )
         {
             if (len >= sizeof(ext_header.nt.FileHeader))
             {
+                static const char fakedll_signature[] = "Wine placeholder DLL";
+                char buffer[sizeof(fakedll_signature)];
+
                 info->type = BINARY_PE;
                 info->arch = ext_header.nt.FileHeader.Machine;
                 if (ext_header.nt.FileHeader.Characteristics & IMAGE_FILE_DLL)
@@ -355,6 +358,15 @@ void MODULE_get_binary_info( HANDLE hfile, struct binary_info *info )
                 case IMAGE_NT_OPTIONAL_HDR64_MAGIC:
                     info->flags |= BINARY_FLAG_64BIT;
                     break;
+                }
+
+                if (header.mz.e_lfanew >= sizeof(header.mz) + sizeof(fakedll_signature) &&
+                    SetFilePointer( hfile, sizeof(header.mz), NULL, SEEK_SET ) == sizeof(header.mz) &&
+                    ReadFile( hfile, buffer, sizeof(fakedll_signature), &len, NULL ) &&
+                    len == sizeof(fakedll_signature) &&
+                    !memcmp( buffer, fakedll_signature, sizeof(fakedll_signature) ))
+                {
+                    info->flags |= BINARY_FLAG_FAKEDLL;
                 }
             }
         }
@@ -538,7 +550,7 @@ BOOL WINAPI GetModuleHandleExW( DWORD flags, LPCWSTR name, HMODULE *module )
 {
     NTSTATUS status = STATUS_SUCCESS;
     HMODULE ret;
-    ULONG magic;
+    ULONG_PTR magic;
     BOOL lock;
 
     if (!module)
@@ -666,7 +678,8 @@ DWORD WINAPI GetModuleFileNameA(
  */
 DWORD WINAPI GetModuleFileNameW( HMODULE hModule, LPWSTR lpFileName, DWORD size )
 {
-    ULONG magic, len = 0;
+    ULONG len = 0;
+    ULONG_PTR magic;
     LDR_MODULE *pldr;
     NTSTATUS nts;
     WIN16_SUBSYSTEM_TIB *win16_tib;
@@ -911,7 +924,7 @@ static HMODULE load_library( const UNICODE_STRING *libname, DWORD flags )
 
     if (flags & LOAD_LIBRARY_AS_DATAFILE)
     {
-        ULONG magic;
+        ULONG_PTR magic;
 
         LdrLockLoaderLock( 0, NULL, &magic );
         if (!LdrGetDllHandle( load_path, flags, libname, &hModule ))

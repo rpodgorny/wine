@@ -128,18 +128,6 @@ typedef union
         int          __pad;
         mod_handle_t base;       /* base address of the dll */
     } unload_dll;
-    struct
-    {
-        int          code;       /* OUTPUT_DEBUG_STRING_EVENT */
-        data_size_t  length;     /* string length */
-        client_ptr_t string;     /* string to display (in debugged process address space) */
-    } output_string;
-    struct
-    {
-        int          code;       /* RIP_EVENT */
-        int          error;      /* ??? */
-        int          type;       /* ??? */
-    } rip_info;
 } debug_event_t;
 
 /* supported CPU types */
@@ -1728,13 +1716,6 @@ enum char_info_mode
 @END
 
 
-/* Send an output string to the debugger */
-@REQ(output_debug_string)
-    data_size_t   length;      /* string length */
-    client_ptr_t  string;      /* string to display (in debugged process address space) */
-@END
-
-
 /* Continue a debug event */
 @REQ(continue_debug_event)
     process_id_t pid;          /* process id to continue */
@@ -2175,7 +2156,6 @@ enum message_type
 @REQ(accept_hardware_message)
     unsigned int    hw_id;     /* id of the hardware message */
     int             remove;    /* should we remove the message? */
-    user_handle_t   new_win;   /* new destination window for current message */
 @END
 
 
@@ -2313,7 +2293,7 @@ enum message_type
 #define NAMED_PIPE_NONBLOCKING_MODE     0x0004
 #define NAMED_PIPE_SERVER_END           0x8000
 
-
+/* Get named pipe information by handle */
 @REQ(get_named_pipe_info)
     obj_handle_t   handle;
 @REPLY
@@ -2325,6 +2305,11 @@ enum message_type
     unsigned int   insize;
 @END
 
+/* Set named pipe information by handle */
+@REQ(set_named_pipe_info)
+    obj_handle_t   handle;
+    unsigned int   flags;
+@END
 
 /* Create a window */
 @REQ(create_window)

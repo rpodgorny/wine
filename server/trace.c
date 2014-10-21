@@ -127,6 +127,8 @@ static void dump_cpu_type( const char *prefix, const cpu_type_t *code )
         CASE(x86);
         CASE(x86_64);
         CASE(POWERPC);
+        CASE(ARM);
+        CASE(ARM64);
         default: fprintf( stderr, "%s%u", prefix, *code ); break;
 #undef CASE
     }
@@ -711,15 +713,6 @@ static void dump_varargs_debug_event( const char *prefix, data_size_t size )
         fprintf( stderr, "%s{unload_dll", prefix );
         dump_uint64( ",base=", &event.unload_dll.base );
         fputc( '}', stderr );
-        break;
-    case OUTPUT_DEBUG_STRING_EVENT:
-        fprintf( stderr, "%s{output_string", prefix );
-        dump_uint64( ",string=", &event.output_string.string );
-        fprintf( stderr, ",len=%u}", event.output_string.length );
-        break;
-    case RIP_EVENT:
-        fprintf( stderr, "%s{rip,err=%d,type=%d}", prefix,
-                 event.rip_info.error, event.rip_info.type );
         break;
     case 0:  /* zero is the code returned on timeouts */
         fprintf( stderr, "%s{}", prefix );
@@ -2174,12 +2167,6 @@ static void dump_get_exception_status_reply( const struct get_exception_status_r
     dump_varargs_context( " context=", cur_size );
 }
 
-static void dump_output_debug_string_request( const struct output_debug_string_request *req )
-{
-    fprintf( stderr, " length=%u", req->length );
-    dump_uint64( ", string=", &req->string );
-}
-
 static void dump_continue_debug_event_request( const struct continue_debug_event_request *req )
 {
     fprintf( stderr, " pid=%04x", req->pid );
@@ -2789,6 +2776,12 @@ static void dump_get_named_pipe_info_reply( const struct get_named_pipe_info_rep
     fprintf( stderr, ", instances=%08x", req->instances );
     fprintf( stderr, ", outsize=%08x", req->outsize );
     fprintf( stderr, ", insize=%08x", req->insize );
+}
+
+static void dump_set_named_pipe_info_request( const struct set_named_pipe_info_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", flags=%08x", req->flags );
 }
 
 static void dump_create_window_request( const struct create_window_request *req )
@@ -4194,7 +4187,6 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_wait_debug_event_request,
     (dump_func)dump_queue_exception_event_request,
     (dump_func)dump_get_exception_status_request,
-    (dump_func)dump_output_debug_string_request,
     (dump_func)dump_continue_debug_event_request,
     (dump_func)dump_debug_process_request,
     (dump_func)dump_debug_break_request,
@@ -4252,6 +4244,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_ioctl_result_request,
     (dump_func)dump_create_named_pipe_request,
     (dump_func)dump_get_named_pipe_info_request,
+    (dump_func)dump_set_named_pipe_info_request,
     (dump_func)dump_create_window_request,
     (dump_func)dump_destroy_window_request,
     (dump_func)dump_get_desktop_window_request,
@@ -4455,7 +4448,6 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_exception_status_reply,
     NULL,
     NULL,
-    NULL,
     (dump_func)dump_debug_break_reply,
     NULL,
     (dump_func)dump_read_process_memory_reply,
@@ -4511,6 +4503,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_ioctl_result_reply,
     (dump_func)dump_create_named_pipe_reply,
     (dump_func)dump_get_named_pipe_info_reply,
+    NULL,
     (dump_func)dump_create_window_reply,
     NULL,
     (dump_func)dump_get_desktop_window_reply,
@@ -4712,7 +4705,6 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "wait_debug_event",
     "queue_exception_event",
     "get_exception_status",
-    "output_debug_string",
     "continue_debug_event",
     "debug_process",
     "debug_break",
@@ -4770,6 +4762,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_ioctl_result",
     "create_named_pipe",
     "get_named_pipe_info",
+    "set_named_pipe_info",
     "create_window",
     "destroy_window",
     "get_desktop_window",

@@ -364,8 +364,11 @@ typedef struct
     LPWSTR statusText;
     DWORD bytesToWrite;
     DWORD bytesWritten;
+
+    CRITICAL_SECTION headers_section;  /* section to protect the headers array */
     HTTPHEADERW *custHeaders;
     DWORD nCustHeaders;
+
     FILETIME last_modified;
     HANDLE hCacheFile;
     req_file_t *req_file;
@@ -420,8 +423,8 @@ DWORD HTTP_Connect(appinfo_t*,LPCWSTR,
 BOOL GetAddress(LPCWSTR lpszServerName, INTERNET_PORT nServerPort,
 	struct sockaddr *psa, socklen_t *sa_len) DECLSPEC_HIDDEN;
 
-DWORD get_cookie(const WCHAR*,const WCHAR*,WCHAR*,DWORD*) DECLSPEC_HIDDEN;
-BOOL set_cookie(const WCHAR*,const WCHAR*,const WCHAR*,const WCHAR*) DECLSPEC_HIDDEN;
+DWORD get_cookie_header(const WCHAR*,const WCHAR*,WCHAR**) DECLSPEC_HIDDEN;
+DWORD set_cookie(const WCHAR*,const WCHAR*,const WCHAR*,const WCHAR*,DWORD) DECLSPEC_HIDDEN;
 
 void INTERNET_SetLastError(DWORD dwError) DECLSPEC_HIDDEN;
 DWORD INTERNET_GetLastError(void) DECLSPEC_HIDDEN;
@@ -457,6 +460,8 @@ LPCVOID NETCON_GetCert(netconn_t *connection) DECLSPEC_HIDDEN;
 int NETCON_GetCipherStrength(netconn_t*) DECLSPEC_HIDDEN;
 DWORD NETCON_set_timeout(netconn_t *connection, BOOL send, DWORD value) DECLSPEC_HIDDEN;
 int sock_get_error(int) DECLSPEC_HIDDEN;
+int sock_send(int fd, const void *msg, size_t len, int flags) DECLSPEC_HIDDEN;
+int sock_recv(int fd, void *msg, size_t len, int flags) DECLSPEC_HIDDEN;
 
 server_t *get_server(const WCHAR*,INTERNET_PORT,BOOL,BOOL);
 

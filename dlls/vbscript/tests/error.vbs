@@ -75,6 +75,7 @@ const RPC_S_SERVER_UNAVAILABLE = &h800706BA&
 const CO_E_SERVER_EXEC_FAILURE = &h80080005&
 
 call ok(Err.Number = 0, "Err.Number = " & Err.Number)
+call ok(getVT(Err.Number) = "VT_I4", "getVT(Err.Number) = " & getVT(Err.Number))
 
 dim calledFunc
 
@@ -283,6 +284,20 @@ call ok(x = 2, "x = " & x)
 x = 0
 call callTestOnError(false)
 call ok(x = 1, "x = " & x)
+
+sub testOnErrorClear()
+    on error resume next
+    call ok(Err.Number = 0, "Err.Number = " & Err.Number)
+    throwInt(E_TESTERROR)
+    call ok(Err.Number = E_TESTERROR, "Err.Number = " & Err.Number)
+
+    on error goto 0
+    call ok(Err.Number = 0, "Err.Number = " & Err.Number)
+    x = "ok"
+end sub
+
+call testOnErrorClear()
+call ok(x = "ok", "testOnErrorClear failed")
 
 sub testForEachError()
     on error resume next

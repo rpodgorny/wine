@@ -246,7 +246,7 @@ static ULONG WINAPI d3d_device_inner_Release(IUnknown *iface)
         if (This->vertex_buffer)
             wined3d_buffer_decref(This->vertex_buffer);
 
-        wined3d_device_set_render_target(This->wined3d_device, 0, NULL, FALSE);
+        wined3d_device_set_rendertarget_view(This->wined3d_device, 0, NULL, FALSE);
 
         /* Release the wined3d device. This won't destroy it. */
         if (!wined3d_device_decref(This->wined3d_device))
@@ -1798,10 +1798,7 @@ static HRESULT WINAPI d3d_device2_GetCurrentViewport(IDirect3DDevice2 *iface, ID
 
 static BOOL validate_surface_palette(struct ddraw_surface *surface)
 {
-    return !(surface->surface_desc.u4.ddpfPixelFormat.dwFlags
-            & (DDPF_PALETTEINDEXED1 | DDPF_PALETTEINDEXED2
-            | DDPF_PALETTEINDEXED4 | DDPF_PALETTEINDEXED8
-            | DDPF_PALETTEINDEXEDTO8))
+    return !format_is_paletteindexed(&surface->surface_desc.u4.ddpfPixelFormat)
             || surface->palette;
 }
 
@@ -1821,8 +1818,8 @@ static HRESULT d3d_device_set_render_target(struct d3d_device *device,
         return DDERR_INVALIDPARAMS;
     }
 
-    if (FAILED(hr = wined3d_device_set_render_target(device->wined3d_device,
-            0, target->wined3d_surface, FALSE)))
+    if (FAILED(hr = wined3d_device_set_rendertarget_view(device->wined3d_device,
+            0, ddraw_surface_get_rendertarget_view(target), FALSE)))
         return hr;
 
     IUnknown_AddRef(rt_iface);
@@ -6762,13 +6759,13 @@ enum wined3d_depth_buffer_type d3d_device_update_depth_stencil(struct d3d_device
     if (!depthStencil)
     {
         TRACE("Setting wined3d depth stencil to NULL\n");
-        wined3d_device_set_depth_stencil(device->wined3d_device, NULL);
+        wined3d_device_set_depth_stencil_view(device->wined3d_device, NULL);
         return WINED3D_ZB_FALSE;
     }
 
     dsi = impl_from_IDirectDrawSurface7(depthStencil);
-    TRACE("Setting wined3d depth stencil to %p (wined3d %p)\n", dsi, dsi->wined3d_surface);
-    wined3d_device_set_depth_stencil(device->wined3d_device, dsi->wined3d_surface);
+    wined3d_device_set_depth_stencil_view(device->wined3d_device,
+            ddraw_surface_get_rendertarget_view(dsi));
 
     IDirectDrawSurface7_Release(depthStencil);
     return WINED3D_ZB_TRUE;
@@ -6821,8 +6818,8 @@ static HRESULT d3d_device_init(struct d3d_device *device, struct ddraw *ddraw,
     wined3d_device_incref(ddraw->wined3d_device);
 
     /* Render to the back buffer */
-    hr = wined3d_device_set_render_target(ddraw->wined3d_device, 0, target->wined3d_surface, TRUE);
-    if (FAILED(hr))
+    if (FAILED(hr = wined3d_device_set_rendertarget_view(ddraw->wined3d_device,
+            0, ddraw_surface_get_rendertarget_view(target), TRUE)))
     {
         ERR("Failed to set render target, hr %#x.\n", hr);
         ddraw_handle_table_destroy(&device->handle_table);

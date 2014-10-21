@@ -88,7 +88,6 @@ static void (CDECL *mono_free)(void *);
 static MonoImage* (CDECL *mono_image_open)(const char *fname, MonoImageOpenStatus *status);
 MonoImage* (CDECL *mono_image_open_from_module_handle)(HMODULE module_handle, char* fname, UINT has_entry_point, MonoImageOpenStatus* status);
 static void (CDECL *mono_install_assembly_preload_hook)(MonoAssemblyPreLoadFunc func, void *user_data);
-void (CDECL *mono_jit_cleanup)(MonoDomain *domain);
 int (CDECL *mono_jit_exec)(MonoDomain *domain, MonoAssembly *assembly, int argc, char *argv[]);
 MonoDomain* (CDECL *mono_jit_init)(const char *file);
 static int (CDECL *mono_jit_set_trace_options)(const char* options);
@@ -100,6 +99,7 @@ static void (CDECL *mono_profiler_install)(MonoProfiler *prof, MonoProfileFunc s
 MonoType* (CDECL *mono_reflection_type_from_name)(char *name, MonoImage *image);
 MonoObject* (CDECL *mono_runtime_invoke)(MonoMethod *method, void *obj, void **params, MonoObject **exc);
 void (CDECL *mono_runtime_object_init)(MonoObject *this_obj);
+void (CDECL *mono_runtime_quit)(void);
 static void (CDECL *mono_set_dirs)(const char *assembly_dir, const char *config_dir);
 static void (CDECL *mono_set_verbose_level)(DWORD level);
 MonoString* (CDECL *mono_string_new)(MonoDomain *domain, const char *str);
@@ -197,7 +197,6 @@ static HRESULT load_mono(CLRRuntimeInfo *This)
         LOAD_MONO_FUNCTION(mono_free);
         LOAD_MONO_FUNCTION(mono_image_open);
         LOAD_MONO_FUNCTION(mono_install_assembly_preload_hook);
-        LOAD_MONO_FUNCTION(mono_jit_cleanup);
         LOAD_MONO_FUNCTION(mono_jit_exec);
         LOAD_MONO_FUNCTION(mono_jit_init);
         LOAD_MONO_FUNCTION(mono_jit_set_trace_options);
@@ -209,6 +208,7 @@ static HRESULT load_mono(CLRRuntimeInfo *This)
         LOAD_MONO_FUNCTION(mono_reflection_type_from_name);
         LOAD_MONO_FUNCTION(mono_runtime_invoke);
         LOAD_MONO_FUNCTION(mono_runtime_object_init);
+        LOAD_MONO_FUNCTION(mono_runtime_quit);
         LOAD_MONO_FUNCTION(mono_set_dirs);
         LOAD_MONO_FUNCTION(mono_set_verbose_level);
         LOAD_MONO_FUNCTION(mono_stringify_assembly_name);
@@ -360,7 +360,7 @@ static HRESULT WINAPI CLRRuntimeInfo_GetVersionString(ICLRRuntimeInfo* iface,
         if (buffer_size >= *pcchBuffer)
             MultiByteToWideChar(CP_UTF8, 0, version, -1, pwzBuffer, buffer_size);
         else
-            hr = HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+            hr = E_NOT_SUFFICIENT_BUFFER;
     }
 
     return hr;
@@ -421,7 +421,7 @@ static HRESULT WINAPI CLRRuntimeInfo_GetRuntimeDirectory(ICLRRuntimeInfo* iface,
         if (buffer_size >= size)
             strcpyW(pwzBuffer, system_dir);
         else
-            hr = HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+            hr = E_NOT_SUFFICIENT_BUFFER;
     }
 
     return hr;
@@ -981,13 +981,11 @@ static BOOL parse_runtime_version(LPCWSTR version, DWORD *major, DWORD *minor, D
         return FALSE;
 }
 
-HRESULT WINAPI CLRMetaHost_GetRuntime(ICLRMetaHost* iface,
-    LPCWSTR pwzVersion, REFIID iid, LPVOID *ppRuntime)
+static HRESULT get_runtime(LPCWSTR pwzVersion, BOOL allow_short,
+    REFIID iid, LPVOID *ppRuntime)
 {
     int i;
     DWORD major, minor, build;
-
-    TRACE("%s %s %p\n", debugstr_w(pwzVersion), debugstr_guid(iid), ppRuntime);
 
     if (!pwzVersion)
         return E_POINTER;
@@ -1003,7 +1001,7 @@ HRESULT WINAPI CLRMetaHost_GetRuntime(ICLRMetaHost* iface,
     for (i=0; i<NUM_RUNTIMES; i++)
     {
         if (runtimes[i].major == major && runtimes[i].minor == minor &&
-            runtimes[i].build == build)
+            (runtimes[i].build == build || (allow_short && major >= 4 && build == 0)))
         {
             if (runtimes[i].found)
                 return ICLRRuntimeInfo_QueryInterface(&runtimes[i].ICLRRuntimeInfo_iface, iid,
@@ -1018,6 +1016,14 @@ HRESULT WINAPI CLRMetaHost_GetRuntime(ICLRMetaHost* iface,
 
     FIXME("Unrecognized version %s\n", debugstr_w(pwzVersion));
     return CLR_E_SHIM_RUNTIME;
+}
+
+HRESULT WINAPI CLRMetaHost_GetRuntime(ICLRMetaHost* iface,
+    LPCWSTR pwzVersion, REFIID iid, LPVOID *ppRuntime)
+{
+    TRACE("%s %s %p\n", debugstr_w(pwzVersion), debugstr_guid(iid), ppRuntime);
+
+    return get_runtime(pwzVersion, FALSE, iid, ppRuntime);
 }
 
 HRESULT WINAPI CLRMetaHost_GetVersionFromFile(ICLRMetaHost* iface,
@@ -1045,7 +1051,7 @@ HRESULT WINAPI CLRMetaHost_GetVersionFromFile(ICLRMetaHost* iface,
                 if (buffer_size >= *pcchBuffer)
                     MultiByteToWideChar(CP_UTF8, 0, version, -1, pwzBuffer, buffer_size);
                 else
-                    hr = HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+                    hr = E_NOT_SUFFICIENT_BUFFER;
             }
         }
 
@@ -1389,7 +1395,7 @@ HRESULT get_runtime_info(LPCWSTR exefile, LPCWSTR version, LPCWSTR config_file,
             supported_runtime *entry;
             LIST_FOR_EACH_ENTRY(entry, &parsed_config.supported_runtimes, supported_runtime, entry)
             {
-                hr = CLRMetaHost_GetRuntime(0, entry->version, &IID_ICLRRuntimeInfo, (void**)result);
+                hr = get_runtime(entry->version, TRUE, &IID_ICLRRuntimeInfo, (void**)result);
                 if (SUCCEEDED(hr))
                 {
                     found = TRUE;

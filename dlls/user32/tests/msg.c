@@ -4871,6 +4871,18 @@ static void test_messages(void)
     flush_events();
     ok_sequence(WmDrawMenuBarSeq, "DrawMenuBar", FALSE);
     ok(SetCursorPos(pos.x, pos.y), "SetCursorPos failed\n");
+
+    DestroyWindow(hwnd);
+
+    hwnd = CreateWindowExA(0, "TestDialogClass", NULL, WS_CHILD|WS_VISIBLE,
+            0, 0, 100, 100, hparent, 0, GetModuleHandleA(0), NULL);
+    ok(hwnd != 0, "Failed to create custom dialog window\n");
+    flush_events();
+    flush_sequence();
+    ok(DrawMenuBar(hwnd), "DrawMenuBar failed: %d\n", GetLastError());
+    flush_events();
+    ok_sequence(WmEmptySeq, "DrawMenuBar for a child window", FALSE);
+
     DestroyWindow(hwnd);
 
     flush_sequence();
@@ -7024,6 +7036,7 @@ static void test_interthread_messages(void)
     ret = pGetCurrentActCtx(&handle);
     ok(ret, "GetCurentActCtx failed: %u\n", GetLastError());
     ok(handle != 0, "active context %p\n", handle);
+    pReleaseActCtx(handle);
 
     /* destination window will test for active context */
     ret = SendMessageA(wnd_event.hwnd, WM_USER+10, 0, 0);

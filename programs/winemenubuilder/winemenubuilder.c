@@ -515,6 +515,8 @@ static HRESULT convert_to_native_icon(IStream *icoFile, int *indices, int numInd
             IWICBitmapSource_Release(sourceBitmap);
         if (dstFrame)
             IWICBitmapFrameEncode_Release(dstFrame);
+        if (options)
+            IPropertyBag2_Release(options);
     }
 
     hr = IWICBitmapEncoder_Commit(encoder);
@@ -610,6 +612,7 @@ static int populate_module_icons(HMODULE hModule, GRPICONDIR *grpIconDir, ICONDI
             if ((hResData = LoadResource(hModule, hResInfo)))
             {
                 BITMAPINFO *pIcon;
+                DWORD size = min( grpIconDir->idEntries[i].dwBytesInRes, ((IMAGE_RESOURCE_DATA_ENTRY *)hResInfo)->Size );
                 if ((pIcon = LockResource(hResData)))
                 {
                     iconDirEntries[validEntries].bWidth = grpIconDir->idEntries[i].bWidth;
@@ -618,11 +621,11 @@ static int populate_module_icons(HMODULE hModule, GRPICONDIR *grpIconDir, ICONDI
                     iconDirEntries[validEntries].bReserved = grpIconDir->idEntries[i].bReserved;
                     iconDirEntries[validEntries].wPlanes = grpIconDir->idEntries[i].wPlanes;
                     iconDirEntries[validEntries].wBitCount = grpIconDir->idEntries[i].wBitCount;
-                    iconDirEntries[validEntries].dwBytesInRes = grpIconDir->idEntries[i].dwBytesInRes;
+                    iconDirEntries[validEntries].dwBytesInRes = size;
                     iconDirEntries[validEntries].dwImageOffset = *iconOffset;
                     validEntries++;
-                    memcpy(&icons[*iconOffset], pIcon, grpIconDir->idEntries[i].dwBytesInRes);
-                    *iconOffset += grpIconDir->idEntries[i].dwBytesInRes;
+                    memcpy(&icons[*iconOffset], pIcon, size);
+                    *iconOffset += size;
                 }
                 FreeResource(hResData);
             }
@@ -1138,6 +1141,7 @@ static HRESULT platform_write_icon(IStream *icoStream, int exeIndex, LPCWSTR ico
     } best[ICNS_SLOTS];
     int indexes[ICNS_SLOTS];
     int i;
+    const char* tmpdir;
     char *icnsPath = NULL;
     LARGE_INTEGER zero;
     HRESULT hr;
@@ -1207,7 +1211,8 @@ static HRESULT platform_write_icon(IStream *icoStream, int exeIndex, LPCWSTR ico
         hr = E_OUTOFMEMORY;
         goto end;
     }
-    icnsPath = heap_printf("/tmp/%s.icns", *nativeIdentifier);
+    if (!(tmpdir = getenv("TMPDIR"))) tmpdir = "/tmp";
+    icnsPath = heap_printf("%s/%s.icns", tmpdir, *nativeIdentifier);
     if (icnsPath == NULL)
     {
         hr = E_OUTOFMEMORY;

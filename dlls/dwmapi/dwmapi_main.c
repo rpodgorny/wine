@@ -108,6 +108,18 @@ HRESULT WINAPI DwmFlush(void)
 }
 
 /**********************************************************************
+ *        DwmInvalidateIconicBitmaps      (DWMAPI.@)
+ */
+HRESULT WINAPI DwmInvalidateIconicBitmaps(HWND hwnd)
+{
+    static BOOL once;
+
+    if (!once++) FIXME("(%p) stub\n", hwnd);
+
+    return E_NOTIMPL;
+}
+
+/**********************************************************************
  *           DwmSetWindowAttribute         (DWMAPI.@)
  */
 HRESULT WINAPI DwmSetWindowAttribute(HWND hwnd, DWORD attributenum, LPCVOID attribute, DWORD size)
@@ -220,5 +232,23 @@ HRESULT WINAPI DwmGetCompositionTimingInfo(HWND hwnd, DWM_TIMING_INFO *info)
 
     if(!i++) FIXME("(%p %p)\n", hwnd, info);
 
+    return E_NOTIMPL;
+}
+
+/**********************************************************************
+ *           DwmAttachMilContent         (DWMAPI.@)
+ */
+HRESULT WINAPI DwmAttachMilContent(HWND hwnd)
+{
+    FIXME("(%p) stub\n", hwnd);
+    return E_NOTIMPL;
+}
+
+/**********************************************************************
+ *           DwmDetachMilContent         (DWMAPI.@)
+ */
+HRESULT WINAPI DwmDetachMilContent(HWND hwnd)
+{
+    FIXME("(%p) stub\n", hwnd);
     return E_NOTIMPL;
 }

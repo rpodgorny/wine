@@ -286,15 +286,36 @@ static HRESULT WINAPI HTMLFormElement_get_elements(IHTMLFormElement *iface, IDis
 static HRESULT WINAPI HTMLFormElement_put_target(IHTMLFormElement *iface, BSTR v)
 {
     HTMLFormElement *This = impl_from_IHTMLFormElement(iface);
-    FIXME("(%p)->(%s)\n", This, wine_dbgstr_w(v));
-    return E_NOTIMPL;
+    nsAString str;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s)\n", This, wine_dbgstr_w(v));
+
+    nsAString_InitDepend(&str, v);
+
+    nsres = nsIDOMHTMLFormElement_SetTarget(This->nsform, &str);
+
+    nsAString_Finish(&str);
+    if (NS_FAILED(nsres)) {
+        ERR("Set Target(%s) failed: %08x\n", wine_dbgstr_w(v), nsres);
+        return E_FAIL;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLFormElement_get_target(IHTMLFormElement *iface, BSTR *p)
 {
     HTMLFormElement *This = impl_from_IHTMLFormElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsAString str;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    nsAString_Init(&str, NULL);
+    nsres = nsIDOMHTMLFormElement_GetTarget(This->nsform, &str);
+
+    return return_nsstr(nsres, &str, p);
 }
 
 static HRESULT WINAPI HTMLFormElement_put_name(IHTMLFormElement *iface, BSTR v)
@@ -436,8 +457,16 @@ static HRESULT WINAPI HTMLFormElement_submit(IHTMLFormElement *iface)
 static HRESULT WINAPI HTMLFormElement_reset(IHTMLFormElement *iface)
 {
     HTMLFormElement *This = impl_from_IHTMLFormElement(iface);
-    FIXME("(%p)->()\n", This);
-    return E_NOTIMPL;
+    nsresult nsres;
+
+    TRACE("(%p)->()\n", This);
+    nsres = nsIDOMHTMLFormElement_Reset(This->nsform);
+    if (NS_FAILED(nsres)) {
+        ERR("Reset failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLFormElement_put_length(IHTMLFormElement *iface, LONG v)
@@ -553,6 +582,9 @@ static HRESULT HTMLFormElement_QI(HTMLDOMNode *iface, REFIID riid, void **ppv)
     }else if(IsEqualGUID(&IID_IHTMLFormElement, riid)) {
         TRACE("(%p)->(IID_IHTMLFormElement %p)\n", This, ppv);
         *ppv = &This->IHTMLFormElement_iface;
+    }else if(IsEqualGUID(&DIID_DispHTMLFormElement, riid)) {
+        TRACE("(%p)->(DIID_DispHTMLFormElement %p)\n", This, ppv);
+        *ppv = &This->IHTMLFormElement_iface;
     }
 
     if(*ppv) {
@@ -568,7 +600,7 @@ static HRESULT HTMLFormElement_get_dispid(HTMLDOMNode *iface,
 {
     HTMLFormElement *This = impl_from_HTMLDOMNode(iface);
     nsIDOMHTMLCollection *elements;
-    nsAString nsname, nsstr;
+    nsAString nsstr, name_str;
     UINT32 len, i;
     nsresult nsres;
     HRESULT hres = DISP_E_UNKNOWNNAME;
@@ -604,7 +636,6 @@ static HRESULT HTMLFormElement_get_dispid(HTMLDOMNode *iface,
         }
     }
 
-    nsAString_InitDepend(&nsname, nameW);
     nsAString_Init(&nsstr, NULL);
     for(i = 0; i < len; ++i) {
         nsIDOMNode *nsitem;
@@ -644,21 +675,22 @@ static HRESULT HTMLFormElement_get_dispid(HTMLDOMNode *iface,
         }
 
         /* compare by name attr */
-        nsres = nsIDOMHTMLElement_GetAttribute(nshtml_elem, &nsname, &nsstr);
+        nsres = get_elem_attr_value(nshtml_elem, nameW, &name_str, &str);
         nsIDOMHTMLElement_Release(nshtml_elem);
-        nsAString_GetData(&nsstr, &str);
-        if(!strcmpiW(str, name)) {
-            /* FIXME: using index for dispid */
-            *pid = MSHTML_DISPID_CUSTOM_MIN + i;
-            hres = S_OK;
-            break;
+        if(NS_SUCCEEDED(nsres)) {
+            if(!strcmpiW(str, name)) {
+                nsAString_Finish(&name_str);
+                /* FIXME: using index for dispid */
+                *pid = MSHTML_DISPID_CUSTOM_MIN + i;
+                hres = S_OK;
+                break;
+            }
+            nsAString_Finish(&name_str);
         }
     }
-    nsAString_Finish(&nsname);
+
     nsAString_Finish(&nsstr);
-
     nsIDOMHTMLCollection_Release(elements);
-
     return hres;
 }
 
@@ -685,12 +717,44 @@ static HRESULT HTMLFormElement_invoke(HTMLDOMNode *iface,
     return S_OK;
 }
 
+static HRESULT HTMLFormElement_handle_event(HTMLDOMNode *iface, eventid_t eid, nsIDOMEvent *event, BOOL *prevent_default)
+{
+    HTMLFormElement *This = impl_from_HTMLDOMNode(iface);
+
+    if(eid == EVENTID_SUBMIT) {
+        *prevent_default = TRUE;
+        return IHTMLFormElement_submit(&This->IHTMLFormElement_iface);
+    }
+
+    return HTMLElement_handle_event(&This->element.node, eid, event, prevent_default);
+}
+
+static void HTMLFormElement_traverse(HTMLDOMNode *iface, nsCycleCollectionTraversalCallback *cb)
+{
+    HTMLFormElement *This = impl_from_HTMLDOMNode(iface);
+
+    if(This->nsform)
+        note_cc_edge((nsISupports*)This->nsform, "This->nsform", cb);
+}
+
+static void HTMLFormElement_unlink(HTMLDOMNode *iface)
+{
+    HTMLFormElement *This = impl_from_HTMLDOMNode(iface);
+
+    if(This->nsform) {
+        nsIDOMHTMLFormElement *nsform = This->nsform;
+
+        This->nsform = NULL;
+        nsIDOMHTMLFormElement_Release(nsform);
+    }
+}
+
 static const NodeImplVtbl HTMLFormElementImplVtbl = {
     HTMLFormElement_QI,
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
-    HTMLElement_handle_event,
+    HTMLFormElement_handle_event,
     HTMLElement_get_attr_col,
     NULL,
     NULL,
@@ -699,7 +763,10 @@ static const NodeImplVtbl HTMLFormElementImplVtbl = {
     NULL,
     NULL,
     HTMLFormElement_get_dispid,
-    HTMLFormElement_invoke
+    HTMLFormElement_invoke,
+    NULL,
+    HTMLFormElement_traverse,
+    HTMLFormElement_unlink
 };
 
 static const tid_t HTMLFormElement_iface_tids[] = {
@@ -730,10 +797,7 @@ HRESULT HTMLFormElement_Create(HTMLDocumentNode *doc, nsIDOMHTMLElement *nselem,
     HTMLElement_Init(&ret->element, doc, nselem, &HTMLFormElement_dispex);
 
     nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLFormElement, (void**)&ret->nsform);
-
-    /* Share the reference with nsnode */
-    assert(nsres == NS_OK && (nsIDOMNode*)ret->nsform == ret->element.node.nsnode);
-    nsIDOMNode_Release(ret->element.node.nsnode);
+    assert(nsres == NS_OK);
 
     *elem = &ret->element;
     return S_OK;

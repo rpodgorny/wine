@@ -95,8 +95,8 @@
 @ stub CM_Get_Device_Interface_ListW
 @ stub CM_Get_Device_Interface_List_ExA
 @ stub CM_Get_Device_Interface_List_ExW
-@ stub CM_Get_Device_Interface_List_SizeA
-@ stub CM_Get_Device_Interface_List_SizeW
+@ stdcall CM_Get_Device_Interface_List_SizeA(ptr ptr str long)
+@ stdcall CM_Get_Device_Interface_List_SizeW(ptr ptr wstr long)
 @ stdcall CM_Get_Device_Interface_List_Size_ExA(ptr ptr str long ptr)
 @ stdcall CM_Get_Device_Interface_List_Size_ExW(ptr ptr wstr long ptr)
 @ stub CM_Get_First_Log_Conf
@@ -384,7 +384,7 @@
 @ stub SetupDiSelectDevice
 @ stub SetupDiSelectOEMDrv
 @ stdcall SetupDiSetClassInstallParamsA(ptr ptr ptr long)
-@ stub SetupDiSetClassInstallParamsW
+@ stdcall SetupDiSetClassInstallParamsW(ptr ptr ptr long)
 @ stdcall SetupDiSetDeviceInstallParamsA(ptr ptr ptr)
 @ stub SetupDiSetDeviceInstallParamsW
 @ stdcall SetupDiSetDeviceRegistryPropertyA(ptr ptr long ptr ptr)
