@@ -30,6 +30,7 @@
 
 #include "dwrite_private.h"
 #include "wine/debug.h"
+#include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dwrite);
 
@@ -391,6 +392,18 @@ HRESULT clone_localizedstring(IDWriteLocalizedStrings *iface, IDWriteLocalizedSt
     return S_OK;
 }
 
+struct collectionloader
+{
+    struct list entry;
+    IDWriteFontCollectionLoader *loader;
+};
+
+struct fileloader
+{
+    struct list entry;
+    IDWriteFontFileLoader *loader;
+};
+
 struct dwritefactory {
     IDWriteFactory IDWriteFactory_iface;
     LONG ref;
@@ -399,10 +412,8 @@ struct dwritefactory {
     IDWriteFontCollection *system_collection;
     IDWriteGdiInterop *gdiinterop;
 
-    IDWriteFontCollectionLoader **loaders;
-    LONG loader_count;
-    IDWriteFontFileLoader **file_loaders;
-    LONG file_loader_count;
+    struct list collection_loaders;
+    struct list file_loaders;
 };
 
 static inline struct dwritefactory *impl_from_IDWriteFactory(IDWriteFactory *iface)
@@ -412,18 +423,24 @@ static inline struct dwritefactory *impl_from_IDWriteFactory(IDWriteFactory *ifa
 
 static void release_dwritefactory(struct dwritefactory *factory)
 {
-    int i;
+    struct fileloader *fileloader, *fileloader2;
+    struct collectionloader *loader, *loader2;
 
     if (factory->localfontfileloader)
         IDWriteLocalFontFileLoader_Release(factory->localfontfileloader);
-    for (i = 0; i < factory->loader_count; i++)
-        if (factory->loaders[i])
-            IDWriteFontCollectionLoader_Release(factory->loaders[i]);
-    heap_free(factory->loaders);
-    for (i = 0; i < factory->file_loader_count; i++)
-        if (factory->file_loaders[i])
-            IDWriteFontFileLoader_Release(factory->file_loaders[i]);
-    heap_free(factory->file_loaders);
+
+    LIST_FOR_EACH_ENTRY_SAFE(loader, loader2, &factory->collection_loaders, struct collectionloader, entry) {
+        list_remove(&loader->entry);
+        IDWriteFontCollectionLoader_Release(loader->loader);
+        heap_free(loader);
+    }
+
+    LIST_FOR_EACH_ENTRY_SAFE(fileloader, fileloader2, &factory->file_loaders, struct fileloader, entry) {
+        list_remove(&fileloader->entry);
+        IDWriteFontFileLoader_Release(fileloader->loader);
+        heap_free(fileloader);
+    }
+
     if (factory->system_collection)
         IDWriteFontCollection_Release(factory->system_collection);
     if (factory->gdiinterop)
@@ -437,6 +454,20 @@ static void release_shared_factory(IDWriteFactory *iface)
     if (!iface) return;
     factory = impl_from_IDWriteFactory(iface);
     release_dwritefactory(factory);
+}
+
+static struct fileloader *factory_get_file_loader(struct dwritefactory *factory, IDWriteFontFileLoader *loader)
+{
+    struct fileloader *entry, *found = NULL;
+
+    LIST_FOR_EACH_ENTRY(entry, &factory->file_loaders, struct fileloader, entry) {
+        if (entry->loader == loader) {
+            found = entry;
+            break;
+        }
+    }
+
+    return found;
 }
 
 static HRESULT WINAPI dwritefactory_QueryInterface(IDWriteFactory *iface, REFIID riid, void **obj)
@@ -512,37 +543,25 @@ static HRESULT WINAPI dwritefactory_RegisterFontCollectionLoader(IDWriteFactory 
     IDWriteFontCollectionLoader *loader)
 {
     struct dwritefactory *This = impl_from_IDWriteFactory(iface);
-    int i;
+    struct collectionloader *entry;
 
     TRACE("(%p)->(%p)\n", This, loader);
 
     if (!loader)
         return E_INVALIDARG;
 
-    for (i = 0; i < This->loader_count; i++)
-        if (This->loaders[i] == loader)
+    LIST_FOR_EACH_ENTRY(entry, &This->collection_loaders, struct collectionloader, entry) {
+        if (entry->loader == loader)
             return DWRITE_E_ALREADYREGISTERED;
-        else if (This->loaders[i] == NULL)
-            break;
-
-    if (i == This->loader_count)
-    {
-        IDWriteFontCollectionLoader **new_list = NULL;
-        int new_count = 0;
-
-        new_count = This->loader_count * 2;
-        new_list = heap_realloc_zero(This->loaders, new_count * sizeof(*This->loaders));
-
-        if (!new_list)
-            return E_OUTOFMEMORY;
-        else
-        {
-            This->loader_count = new_count;
-            This->loaders = new_list;
-        }
     }
+
+    entry = heap_alloc(sizeof(*entry));
+    if (!entry)
+        return E_OUTOFMEMORY;
+
+    entry->loader = loader;
     IDWriteFontCollectionLoader_AddRef(loader);
-    This->loaders[i] = loader;
+    list_add_tail(&This->collection_loaders, &entry->entry);
 
     return S_OK;
 }
@@ -551,19 +570,26 @@ static HRESULT WINAPI dwritefactory_UnregisterFontCollectionLoader(IDWriteFactor
     IDWriteFontCollectionLoader *loader)
 {
     struct dwritefactory *This = impl_from_IDWriteFactory(iface);
-    int i;
+    struct collectionloader *entry, *found = NULL;
 
     TRACE("(%p)->(%p)\n", This, loader);
 
     if (!loader)
         return E_INVALIDARG;
 
-    for (i = 0; i < This->loader_count; i++)
-        if (This->loaders[i] == loader) break;
-    if (i == This->loader_count)
-            return E_INVALIDARG;
-    IDWriteFontCollectionLoader_Release(This->loaders[i]);
-    This->loaders[i] = NULL;
+    LIST_FOR_EACH_ENTRY(entry, &This->collection_loaders, struct collectionloader, entry) {
+        if (entry->loader == loader) {
+            found = entry;
+            break;
+        }
+    }
+
+    if (!found)
+        return E_INVALIDARG;
+
+    IDWriteFontCollectionLoader_Release(found->loader);
+    list_remove(&found->entry);
+    heap_free(found);
 
     return S_OK;
 }
@@ -587,21 +613,14 @@ static HRESULT WINAPI dwritefactory_CreateFontFileReference(IDWriteFactory *ifac
 static HRESULT WINAPI dwritefactory_CreateCustomFontFileReference(IDWriteFactory *iface,
     void const *reference_key, UINT32 key_size, IDWriteFontFileLoader *loader, IDWriteFontFile **font_file)
 {
-    int i;
     struct dwritefactory *This = impl_from_IDWriteFactory(iface);
-    HRESULT hr;
 
     TRACE("(%p)->(%p %u %p %p)\n", This, reference_key, key_size, loader, font_file);
 
-    if (loader == NULL)
+    if (!loader || !factory_get_file_loader(This, loader))
         return E_INVALIDARG;
 
-    for (i = 0; i < This->file_loader_count; i++)
-        if (This->file_loaders[i] == loader) break;
-    if (i == This->file_loader_count)
-        return E_INVALIDARG;
-    hr = create_font_file(loader, reference_key, key_size, font_file);
-    return hr;
+    return create_font_file(loader, reference_key, key_size, font_file);
 }
 
 static HRESULT WINAPI dwritefactory_CreateFontFace(IDWriteFactory *iface,
@@ -650,53 +669,47 @@ static HRESULT WINAPI dwritefactory_CreateCustomRenderingParams(IDWriteFactory *
 
 static HRESULT WINAPI dwritefactory_RegisterFontFileLoader(IDWriteFactory *iface, IDWriteFontFileLoader *loader)
 {
-    int i;
     struct dwritefactory *This = impl_from_IDWriteFactory(iface);
+    struct fileloader *entry;
+
     TRACE("(%p)->(%p)\n", This, loader);
 
     if (!loader)
         return E_INVALIDARG;
 
-    for (i = 0; i < This->file_loader_count; i++)
-        if (This->file_loaders[i] == loader)
+    LIST_FOR_EACH_ENTRY(entry, &This->file_loaders, struct fileloader, entry) {
+        if (entry->loader == loader)
             return DWRITE_E_ALREADYREGISTERED;
-        else if (This->file_loaders[i] == NULL)
-            break;
-
-    if (i == This->file_loader_count)
-    {
-        IDWriteFontFileLoader **new_list = NULL;
-        int new_count = 0;
-
-        new_count = This->file_loader_count * 2;
-        new_list = heap_realloc_zero(This->file_loaders, new_count * sizeof(*This->file_loaders));
-
-        if (!new_list)
-            return E_OUTOFMEMORY;
-        else
-        {
-            This->file_loader_count = new_count;
-            This->file_loaders = new_list;
-        }
     }
+
+    entry = heap_alloc(sizeof(*entry));
+    if (!entry)
+        return E_OUTOFMEMORY;
+
+    entry->loader = loader;
     IDWriteFontFileLoader_AddRef(loader);
-    This->file_loaders[i] = loader;
+    list_add_tail(&This->file_loaders, &entry->entry);
 
     return S_OK;
 }
 
 static HRESULT WINAPI dwritefactory_UnregisterFontFileLoader(IDWriteFactory *iface, IDWriteFontFileLoader *loader)
 {
-    int i;
     struct dwritefactory *This = impl_from_IDWriteFactory(iface);
+    struct fileloader *found;
+
     TRACE("(%p)->(%p)\n", This, loader);
 
-    for (i = 0; i < This->file_loader_count; i++)
-        if (This->file_loaders[i] == loader) break;
-    if (i == This->file_loader_count)
-            return E_INVALIDARG;
-    IDWriteFontFileLoader_Release(This->file_loaders[i]);
-    This->file_loaders[i] = NULL;
+    if (!loader)
+        return E_INVALIDARG;
+
+    found = factory_get_file_loader(This, loader);
+    if (!found)
+        return E_INVALIDARG;
+
+    IDWriteFontFileLoader_Release(found->loader);
+    list_remove(&found->entry);
+    heap_free(found);
 
     return S_OK;
 }
@@ -870,31 +883,21 @@ static const struct IDWriteFactoryVtbl shareddwritefactoryvtbl = {
     dwritefactory_CreateGlyphRunAnalysis
 };
 
-static HRESULT init_dwritefactory(struct dwritefactory *factory, const struct IDWriteFactoryVtbl *vtbl)
+static void init_dwritefactory(struct dwritefactory *factory, const struct IDWriteFactoryVtbl *vtbl)
 {
     factory->IDWriteFactory_iface.lpVtbl = vtbl;
     factory->ref = 1;
     factory->localfontfileloader = NULL;
-    factory->loader_count = 2;
-    factory->loaders = heap_alloc_zero(sizeof(*factory->loaders) * 2);
-    factory->file_loader_count = 2;
-    factory->file_loaders = heap_alloc_zero(sizeof(*factory->file_loaders) * 2);
     factory->system_collection = NULL;
     factory->gdiinterop = NULL;
 
-    if (!factory->loaders || !factory->file_loaders) {
-        heap_free(factory->loaders);
-        heap_free(factory->file_loaders);
-        return E_OUTOFMEMORY;
-    }
-
-    return S_OK;
+    list_init(&factory->collection_loaders);
+    list_init(&factory->file_loaders);
 }
 
 HRESULT WINAPI DWriteCreateFactory(DWRITE_FACTORY_TYPE type, REFIID riid, IUnknown **ret)
 {
     struct dwritefactory *factory;
-    HRESULT hr;
 
     TRACE("(%d, %s, %p)\n", type, debugstr_guid(riid), ret);
 
@@ -911,11 +914,7 @@ HRESULT WINAPI DWriteCreateFactory(DWRITE_FACTORY_TYPE type, REFIID riid, IUnkno
     factory = heap_alloc(sizeof(struct dwritefactory));
     if (!factory) return E_OUTOFMEMORY;
 
-    hr = init_dwritefactory(factory, type == DWRITE_FACTORY_TYPE_SHARED ? &shareddwritefactoryvtbl : &dwritefactoryvtbl);
-    if (FAILED(hr)) {
-        heap_free(factory);
-        return hr;
-    }
+    init_dwritefactory(factory, type == DWRITE_FACTORY_TYPE_SHARED ? &shareddwritefactoryvtbl : &dwritefactoryvtbl);
 
     if (type == DWRITE_FACTORY_TYPE_SHARED)
         if (InterlockedCompareExchangePointer((void**)&shared_factory, factory, NULL)) {
