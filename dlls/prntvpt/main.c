@@ -1,5 +1,7 @@
 /*
- * Copyright (C) 2007 Francois Gouget
+ * Print Ticket Services Module
+ *
+ * Copyright 2014 Jactry Zeng for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,41 +18,26 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __WINE_BCRYPT_H
-#define __WINE_BCRYPT_H
+#include "config.h"
+#include <stdarg.h>
 
-#ifndef WINAPI
-#define WINAPI __stdcall
-#endif
+#include "windef.h"
+#include "winbase.h"
+#include "wine/debug.h"
 
-#ifndef IN
-#define IN
-#endif
+WINE_DEFAULT_DEBUG_CHANNEL(prntvpt);
 
-#ifndef OUT
-#define OUT
-#endif
-
-#ifndef OPTIONAL
-#define OPTIONAL
-#endif
-
-#ifndef WINE_NTSTATUS_DECLARED
-#define WINE_NTSTATUS_DECLARED
-typedef LONG NTSTATUS;
-#endif
-
-typedef struct _BCRYPT_ALGORITHM_IDENTIFIER
+BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved)
 {
-    LPWSTR pszName;
-    ULONG  dwClass;
-    ULONG  dwFlags;
-} BCRYPT_ALGORITHM_IDENTIFIER;
+    TRACE("(%p, %d, %p)\n", hinst, reason, reserved);
 
-typedef PVOID BCRYPT_ALG_HANDLE;
-typedef PVOID BCRYPT_HANDLE;
-
-#define BCRYPT_RNG_USE_ENTROPY_IN_BUFFER 0x00000001
-#define BCRYPT_USE_SYSTEM_PREFERRED_RNG  0x00000002
-
-#endif  /* __WINE_BCRYPT_H */
+    switch(reason)
+    {
+        case DLL_WINE_PREATTACH:
+            return FALSE; /* prefer native version */
+        case DLL_PROCESS_ATTACH:
+            DisableThreadLibraryCalls(hinst);
+            break;
+    }
+    return TRUE;
+}
