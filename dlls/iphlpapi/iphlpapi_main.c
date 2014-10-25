@@ -983,6 +983,7 @@ static ULONG adapterAddressesFromIndex(ULONG family, ULONG flags, IF_INDEX index
                 struct WS_sockaddr_in6 *sa;
                 const IN6_ADDR *addr, *mask;
                 BOOL done = FALSE;
+                ULONG k;
 
                 prefix->u.s.Length = sizeof(*prefix);
                 prefix->u.s.Flags  = 0;
@@ -1000,11 +1001,11 @@ static ULONG adapterAddressesFromIndex(ULONG family, ULONG flags, IF_INDEX index
                 sa->sin6_scope_id = 0;
 
                 prefix->PrefixLength = 0;
-                for (i = 0; i < 8 && !done; i++)
+                for (k = 0; k < 8 && !done; k++)
                 {
                     for (j = 0; j < sizeof(WORD) * 8 && !done; j++)
                     {
-                        if (mask->u.Word[i] & 1 << j) prefix->PrefixLength++;
+                        if (mask->u.Word[k] & 1 << j) prefix->PrefixLength++;
                         else done = TRUE;
                     }
                 }
@@ -1250,7 +1251,7 @@ ULONG WINAPI DECLSPEC_HOTPATCH GetAdaptersAddresses(ULONG family, ULONG flags, P
                                                     PIP_ADAPTER_ADDRESSES aa, PULONG buflen)
 {
     InterfaceIndexTable *table;
-    ULONG i, size, dns_server_size, dns_suffix_size, total_size, ret = ERROR_NO_DATA;
+    ULONG i, size, dns_server_size = 0, dns_suffix_size, total_size, ret = ERROR_NO_DATA;
 
     TRACE("(%d, %08x, %p, %p, %p)\n", family, flags, reserved, aa, buflen);
 
@@ -1307,7 +1308,7 @@ ULONG WINAPI DECLSPEC_HOTPATCH GetAdaptersAddresses(ULONG family, ULONG flags, P
                 size = bytes_left -= size;
             }
         }
-        if (!(flags & GAA_FLAG_SKIP_DNS_SERVER) && dns_server_size)
+        if (dns_server_size)
         {
             firstDns = (PIP_ADAPTER_DNS_SERVER_ADDRESS)((BYTE *)first_aa + total_size - dns_server_size - dns_suffix_size);
             get_dns_server_addresses(firstDns, &dns_server_size);

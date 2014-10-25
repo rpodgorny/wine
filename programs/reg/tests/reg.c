@@ -91,6 +91,7 @@ static void test_add(void)
     HKEY hkey;
     LONG err;
     DWORD r, dword, type, size;
+    char buffer[22];
 
     run_reg_exe("reg add", &r);
     ok(r == REG_EXIT_FAILURE, "got exit code %d, expected 1\n", r);
@@ -136,6 +137,60 @@ static void test_add(void)
     ok(r == REG_EXIT_SUCCESS, "got exit code %d, expected 0\n", r);
     verify_reg(hkey, "test3", REG_SZ, "", 1, 0);
 
+    /* REG_EXPAND_SZ */
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /v expand0 /t REG_EXpand_sz /d \"dead%PATH%beef\" /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    verify_reg(hkey, "expand0", REG_EXPAND_SZ, "dead%PATH%beef", 15, TODO_REG_SIZE);
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /v expand1 /t REG_EXpand_sz /d \"dead^%PATH^%beef\" /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    verify_reg(hkey, "expand1", REG_EXPAND_SZ, "dead^%PATH^%beef", 17, TODO_REG_SIZE);
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_EXPAND_SZ /v expand2 /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    verify_reg(hkey, "expand2", REG_EXPAND_SZ, "", 1, TODO_REG_SIZE);
+
+    run_reg_exe("reg add HKEY_CURRENT_USER\\" KEY_BASE " /ve /t REG_EXPAND_SZ /d WineTEST /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    verify_reg(hkey, "", REG_EXPAND_SZ, "WineTEST", 9, TODO_REG_SIZE);
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_EXPAND_SZ /v expand3 /f /d \"\"", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    verify_reg(hkey, "expand3", REG_EXPAND_SZ, "", 1, TODO_REG_SIZE);
+
+    /* REG_BINARY */
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_BINARY /v bin0 /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    verify_reg(hkey, "bin0", REG_BINARY, buffer, 0, 0);
+
+    run_reg_exe("reg add HKEY_CURRENT_USER\\" KEY_BASE " /ve /t REG_BINARY /d deadbeef /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    dword = 0xefbeadde;
+    verify_reg(hkey, "", REG_BINARY, &dword, sizeof(DWORD), TODO_REG_SIZE);
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_BINARY /v bin1 /f /d 0xDeAdBeEf", &r);
+    todo_wine ok(r == REG_EXIT_FAILURE, "got exit code %u\n", r);
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_BINARY /v bin2 /f /d x01", &r);
+    todo_wine ok(r == REG_EXIT_FAILURE, "got exit code %u\n", r);
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_BINARY /v bin3 /f /d 01x", &r);
+    todo_wine ok(r == REG_EXIT_FAILURE, "got exit code %u\n", r);
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_BINARY /v bin4 /f /d DeAdBeEf0DD", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    /* Remaining nibble prefixed */
+    buffer[0] = 0x0d; buffer[1] = 0xea; buffer[2] = 0xdb;
+    buffer[3] = 0xee; buffer[4] = 0xf0; buffer[5] = 0xdd;
+    /* Remaining nibble suffixed on winXP */
+    buffer[6] = 0xde; buffer[7] = 0xad; buffer[8] = 0xbe;
+    buffer[9] = 0xef; buffer[10] = 0x0d; buffer[11] = 0xd0;
+    size = 6;
+    err = RegQueryValueExA(hkey, "bin4", NULL, &type, (void *) (buffer+12), &size);
+    ok(err == ERROR_SUCCESS, "RegQueryValueEx failed: got %d\n", err);
+    ok(type == REG_BINARY, "got wrong type %u\n", type);
+    todo_wine ok(size == 6, "got wrong size %u\n", size);
+    todo_wine ok(memcmp(buffer, buffer+12, 6) == 0 ||
+        broken(memcmp(buffer+6, buffer+12, 6) == 0 /* WinXP */), "got wrong data\n");
+
     /* REG_DWORD */
     run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_DWORD /f /d 12345678", &r);
     ok(r == REG_EXIT_SUCCESS || broken(r == REG_EXIT_FAILURE /* WinXP */),
@@ -180,11 +235,64 @@ static void test_add(void)
     verify_reg(hkey, "dword8", REG_DWORD, &dword, sizeof(dword),
                (sizeof(long) > sizeof(DWORD)) ? 0 : TODO_REG_DATA);
 
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_DWORD /v dword9 /f /d -1", &r);
+    todo_wine ok(r == REG_EXIT_FAILURE || broken(r == REG_EXIT_SUCCESS /* WinXP */), "got exit code %u\n", r);
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_DWORD /v dword10 /f /d -0x1", &r);
+    todo_wine ok(r == REG_EXIT_FAILURE || broken(r == REG_EXIT_SUCCESS /* WinXP */), "got exit code %u\n", r);
+
     /* REG_DWORD_LITTLE_ENDIAN */
     run_reg_exe("reg add HKCU\\" KEY_BASE " /v DWORD_LE /t REG_DWORD_LITTLE_ENDIAN /d 456 /f", &r);
     ok(r == REG_EXIT_SUCCESS, "got exit code %d, expected 0\n", r);
     dword = 456;
     verify_reg(hkey, "DWORD_LE", REG_DWORD_LITTLE_ENDIAN, &dword, sizeof(dword), 0);
+
+    /* REG_DWORD_BIG_ENDIAN */
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /v DWORD_BE /t REG_DWORD_BIG_ENDIAN /d 456 /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    dword = 456;
+    verify_reg(hkey, "DWORD_BE", REG_DWORD_BIG_ENDIAN, &dword, sizeof(dword), TODO_REG_SIZE);
+    /* REG_DWORD_BIG_ENDIAN is broken in every version of windows. It behaves like
+     * an ordinary REG_DWORD - that is little endian. GG */
+
+    /* REG_MULTI_SZ */
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /v multi0 /t REG_MULTI_SZ /d \"three\\0little\\0strings\" /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    memcpy(buffer, "three\0little\0strings\0", 22);
+    verify_reg(hkey, "multi0", REG_MULTI_SZ, buffer, 22, TODO_REG_SIZE);
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_MULTI_SZ /v multi1 /s \"#\" /d \"three#little#strings\" /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    verify_reg(hkey, "multi1", REG_MULTI_SZ, buffer, 22, TODO_REG_SIZE);
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_MULTI_SZ /v multi2 /d \"\" /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    verify_reg(hkey, "multi2", REG_MULTI_SZ, &buffer[21], 1, TODO_REG_SIZE);
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_MULTI_SZ /v multi3 /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    verify_reg(hkey, "multi3", REG_MULTI_SZ, &buffer[21], 1, TODO_REG_SIZE);
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_MULTI_SZ /v multi4 /s \"#\" /d \"threelittlestrings\" /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    verify_reg(hkey, "multi4", REG_MULTI_SZ, "threelittlestrings\0", 20, TODO_REG_SIZE);
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_MULTI_SZ /v multi5 /s \"#randomgibberish\" /d \"three#little#strings\" /f", &r);
+    todo_wine ok(r == REG_EXIT_FAILURE, "got exit code %u\n", r);
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_MULTI_SZ /v multi6 /s \"\\0\" /d \"three\\0little\\0strings\" /f", &r);
+    todo_wine ok(r == REG_EXIT_FAILURE, "got exit code %u\n", r);
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_MULTI_SZ /v multi7 /s \"\" /d \"three#little#strings\" /f", &r);
+    todo_wine ok(r == REG_EXIT_FAILURE, "got exit code %u\n", r);
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_MULTI_SZ /v multi8 /s \"#\" /d \"##\" /f", &r);
+    todo_wine ok(r == REG_EXIT_FAILURE, "got exit code %u\n", r);
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_MULTI_SZ /v multi9 /s \"#\" /d \"two##strings\" /f", &r);
+    todo_wine ok(r == REG_EXIT_FAILURE, "got exit code %u\n", r);
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_MULTI_SZ /v multi10 /s \"#\" /d \"#a\" /f", &r);
+    todo_wine ok(r == REG_EXIT_FAILURE, "got exit code %u\n", r);
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_MULTI_SZ /v multi11 /s \"#\" /d \"a#\" /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    buffer[0]='a'; buffer[1]=0; buffer[2]=0;
+    verify_reg(hkey, "multi11", REG_MULTI_SZ, buffer, 3, TODO_REG_SIZE);
 
     RegCloseKey(hkey);
 
