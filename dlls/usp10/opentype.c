@@ -924,10 +924,9 @@ static INT GSUB_apply_LigatureSubst(const OT_LookupTable *look, WORD *glyphs, IN
 static INT GSUB_apply_ChainContextSubst(const OT_LookupList* lookup, const OT_LookupTable *look, WORD *glyphs, INT glyph_index, INT write_dir, INT *glyph_count)
 {
     int j;
-    BOOL done = FALSE;
 
     TRACE("Chaining Contextual Substitution Subtable\n");
-    for (j = 0; j < GET_BE_WORD(look->SubTableCount) && !done; j++)
+    for (j = 0; j < GET_BE_WORD(look->SubTableCount); j++)
     {
         const GSUB_ChainContextSubstFormat1 *ccsf1;
         int offset;
@@ -938,12 +937,16 @@ static INT GSUB_apply_ChainContextSubst(const OT_LookupList* lookup, const OT_Lo
         ccsf1 = (const GSUB_ChainContextSubstFormat1*)((const BYTE*)look+offset);
         if (GET_BE_WORD(ccsf1->SubstFormat) == 1)
         {
-            FIXME("  TODO: subtype 1 (Simple context glyph substitution)\n");
+            static int once;
+            if (!once++)
+                FIXME("  TODO: subtype 1 (Simple context glyph substitution)\n");
             continue;
         }
         else if (GET_BE_WORD(ccsf1->SubstFormat) == 2)
         {
-            FIXME("  TODO: subtype 2 (Class-based Chaining Context Glyph Substitution)\n");
+            static int once;
+            if (!once++)
+                FIXME("  TODO: subtype 2 (Class-based Chaining Context Glyph Substitution)\n");
             continue;
         }
         else if (GET_BE_WORD(ccsf1->SubstFormat) == 3)
@@ -1649,12 +1652,16 @@ static INT GPOS_apply_ChainContextPos(ScriptCache *psc, LPOUTLINETEXTMETRICW lpo
 
         if (GET_BE_WORD(ccpf3->PosFormat) == 1)
         {
-            FIXME("  TODO: subtype 1 (Simple Chaining Context Glyph Positioning)\n");
+            static int once;
+            if (!once++)
+                FIXME("  TODO: subtype 1 (Simple Chaining Context Glyph Positioning)\n");
             continue;
         }
         else if (GET_BE_WORD(ccpf3->PosFormat) == 2)
         {
-            FIXME("  TODO: subtype 2 (Class-based Chaining Context Glyph Positioning)\n");
+            static int once;
+            if (!once++)
+                FIXME("  TODO: subtype 2 (Class-based Chaining Context Glyph Positioning)\n");
             continue;
         }
         else if (GET_BE_WORD(ccpf3->PosFormat) == 3)

@@ -40,6 +40,7 @@ struct rendertarget {
     IDWriteBitmapRenderTarget IDWriteBitmapRenderTarget_iface;
     LONG ref;
 
+    FLOAT pixels_per_dip;
     DWRITE_MATRIX m;
     SIZE size;
     HDC hdc;
@@ -140,15 +141,21 @@ static HDC WINAPI rendertarget_GetMemoryDC(IDWriteBitmapRenderTarget *iface)
 static FLOAT WINAPI rendertarget_GetPixelsPerDip(IDWriteBitmapRenderTarget *iface)
 {
     struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget(iface);
-    FIXME("(%p): stub\n", This);
-    return 1.0;
+    TRACE("(%p)\n", This);
+    return This->pixels_per_dip;
 }
 
 static HRESULT WINAPI rendertarget_SetPixelsPerDip(IDWriteBitmapRenderTarget *iface, FLOAT pixels_per_dip)
 {
     struct rendertarget *This = impl_from_IDWriteBitmapRenderTarget(iface);
-    FIXME("(%p)->(%f): stub\n", This, pixels_per_dip);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%.2f)\n", This, pixels_per_dip);
+
+    if (pixels_per_dip <= 0.0)
+        return E_INVALIDARG;
+
+    This->pixels_per_dip = pixels_per_dip;
+    return S_OK;
 }
 
 static HRESULT WINAPI rendertarget_GetCurrentTransform(IDWriteBitmapRenderTarget *iface, DWRITE_MATRIX *transform)
@@ -229,6 +236,7 @@ static HRESULT create_rendertarget(HDC hdc, UINT32 width, UINT32 height, IDWrite
     target->m.m11 = target->m.m22 = 1.0;
     target->m.m12 = target->m.m21 = 0.0;
     target->m.dx  = target->m.dy  = 0.0;
+    target->pixels_per_dip = 1.0;
 
     *ret = &target->IDWriteBitmapRenderTarget_iface;
 
@@ -318,8 +326,54 @@ static HRESULT WINAPI gdiinterop_ConvertFontToLOGFONT(IDWriteGdiInterop *iface,
     IDWriteFont *font, LOGFONTW *logfont, BOOL *is_systemfont)
 {
     struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
-    FIXME("(%p)->(%p %p %p): stub\n", This, font, logfont, is_systemfont);
-    return E_NOTIMPL;
+    static const WCHAR enusW[] = {'e','n','-','u','s',0};
+    DWRITE_FONT_SIMULATIONS simulations;
+    IDWriteFontCollection *collection;
+    IDWriteLocalizedStrings *name;
+    IDWriteFontFamily *family;
+    DWRITE_FONT_STYLE style;
+    UINT32 index;
+    BOOL exists;
+    HRESULT hr;
+
+    TRACE("(%p)->(%p %p %p)\n", This, font, logfont, is_systemfont);
+
+    *is_systemfont = FALSE;
+
+    if (!font)
+        return E_INVALIDARG;
+
+    hr = IDWriteFont_GetFontFamily(font, &family);
+    if (FAILED(hr))
+        return hr;
+
+    hr = IDWriteFontFamily_GetFontCollection(family, &collection);
+    IDWriteFontFamily_Release(family);
+    if (FAILED(hr))
+        return hr;
+
+    *is_systemfont = is_system_collection(collection);
+    IDWriteFontCollection_Release(collection);
+
+    simulations = IDWriteFont_GetSimulations(font);
+    style = IDWriteFont_GetStyle(font);
+
+    logfont->lfCharSet = DEFAULT_CHARSET;
+    logfont->lfWeight = IDWriteFont_GetWeight(font);
+    logfont->lfItalic = style == DWRITE_FONT_STYLE_ITALIC || (simulations & DWRITE_FONT_SIMULATIONS_OBLIQUE);
+    logfont->lfOutPrecision = OUT_OUTLINE_PRECIS;
+    logfont->lfFaceName[0] = 0;
+
+    exists = FALSE;
+    hr = IDWriteFont_GetInformationalStrings(font, DWRITE_INFORMATIONAL_STRING_WIN32_FAMILY_NAMES, &name, &exists);
+    if (FAILED(hr) || !exists)
+        return hr;
+
+    IDWriteLocalizedStrings_FindLocaleName(name, enusW, &index, &exists);
+    IDWriteLocalizedStrings_GetString(name, index, logfont->lfFaceName, sizeof(logfont->lfFaceName)/sizeof(WCHAR));
+    IDWriteLocalizedStrings_Release(name);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI gdiinterop_ConvertFontFaceToLOGFONT(IDWriteGdiInterop *iface,

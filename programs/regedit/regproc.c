@@ -255,7 +255,7 @@ static DWORD getDataType(LPWSTR *lpValue, DWORD* parse_type)
 /******************************************************************************
  * Replaces escape sequences with the characters.
  */
-static void REGPROC_unescape_string(WCHAR* str)
+static int REGPROC_unescape_string(WCHAR* str)
 {
     int str_idx = 0;            /* current character under analysis */
     int val_idx = 0;            /* the last character of the unescaped string */
@@ -266,6 +266,12 @@ static void REGPROC_unescape_string(WCHAR* str)
             switch (str[str_idx]) {
             case 'n':
                 str[val_idx] = '\n';
+                break;
+            case 'r':
+                str[val_idx] = '\r';
+                break;
+            case '0':
+                str[val_idx] = '\0';
                 break;
             case '\\':
             case '"':
@@ -282,6 +288,7 @@ static void REGPROC_unescape_string(WCHAR* str)
         }
     }
     str[val_idx] = '\0';
+    return val_idx;
 }
 
 static BOOL parseKeyName(LPWSTR lpKeyName, HKEY *hKey, LPWSTR *lpKeyPath)
@@ -364,19 +371,10 @@ static LONG setValue(WCHAR* val_name, WCHAR* val_data, BOOL is_unicode)
 
     if (dwParseType == REG_SZ)          /* no conversion for string */
     {
-        REGPROC_unescape_string(val_data);
-        /* Compute dwLen after REGPROC_unescape_string because it may
-         * have changed the string length and we don't want to store
-         * the extra garbage in the registry.
-         */
-        dwLen = lstrlenW(val_data);
-        if(val_data[dwLen-1] != '"')
+        dwLen = REGPROC_unescape_string(val_data);
+        if(!dwLen || val_data[dwLen-1] != '"')
             return ERROR_INVALID_DATA;
-        if (dwLen>0 && val_data[dwLen-1]=='"')
-        {
-            dwLen--;
-            val_data[dwLen]='\0';
-        }
+        val_data[dwLen-1] = '\0'; /* remove last quotes */
         lpbData = (BYTE*) val_data;
         dwLen++;  /* include terminating null */
         dwLen = dwLen * sizeof(WCHAR); /* size is in bytes */
@@ -968,6 +966,13 @@ static void REGPROC_export_string(WCHAR **line_buf, DWORD *line_buf_size, DWORD 
             (*line_buf)[pos++] = 'n';
             break;
 
+        case '\r':
+            extra++;
+            REGPROC_resize_char_buffer(line_buf, line_buf_size, *line_len + str_len + extra);
+            (*line_buf)[pos++] = '\\';
+            (*line_buf)[pos++] = 'r';
+            break;
+
         case '\\':
         case '"':
             extra++;
@@ -1180,10 +1185,7 @@ static void export_hkey(FILE *file, HKEY key,
                     lstrcpyW(*line_buf + line_len, start);
                     line_len += len;
 
-                    /* At this point we know wstr is '\0'-terminated
-                     * so we can subtract 1 from the size
-                     */
-                    REGPROC_export_string(line_buf, line_buf_size, &line_len, wstr, val_size1 / sizeof(WCHAR) - 1);
+                    REGPROC_export_string(line_buf, line_buf_size, &line_len, wstr, lstrlenW(wstr));
 
                     REGPROC_resize_char_buffer(line_buf, line_buf_size, line_len + lstrlenW(end));
                     lstrcpyW(*line_buf + line_len, end);

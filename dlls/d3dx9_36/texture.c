@@ -302,12 +302,13 @@ HRESULT WINAPI D3DXCheckTextureRequirements(struct IDirect3DDevice9 *device, UIN
 
             /* This format can be used, let's evaluate it.
                Weights chosen quite arbitrarily... */
-            score = 16 - 4 * (curchannels - channels);
+            score = 512 * (curfmt->type == fmt->type);
+            score -= 32 * (curchannels - channels);
 
             for (j = 0; j < 4; j++)
             {
                 int diff = curfmt->bits[j] - fmt->bits[j];
-                score += 16 - (diff < 0 ? -diff * 4 : diff);
+                score -= (diff < 0 ? -diff * 8 : diff) * (j == 0 ? 1 : 2);
             }
 
             if (score > bestscore)
@@ -538,6 +539,29 @@ HRESULT WINAPI D3DXCreateTexture(struct IDirect3DDevice9 *device, UINT width, UI
     return IDirect3DDevice9_CreateTexture(device, width, height, miplevels, usage, format, pool, texture, NULL);
 }
 
+static D3DFORMAT get_alpha_replacement_format(D3DFORMAT format)
+{
+    static const struct
+    {
+        D3DFORMAT orig_format;
+        D3DFORMAT replacement_format;
+    }
+    replacement_formats[] =
+    {
+        {D3DFMT_X8R8G8B8, D3DFMT_A8R8G8B8},
+        {D3DFMT_X1R5G5B5, D3DFMT_A1R5G5B5},
+        {D3DFMT_X4R4G4B4, D3DFMT_A4R4G4B4},
+        {D3DFMT_X8B8G8R8, D3DFMT_A8B8G8R8},
+        {D3DFMT_L8, D3DFMT_A8L8},
+    };
+    unsigned int i;
+
+    for (i = 0; i < sizeof(replacement_formats) / sizeof(replacement_formats[0]); ++i)
+        if (replacement_formats[i].orig_format == format)
+            return replacement_formats[i].replacement_format;
+    return format;
+}
+
 HRESULT WINAPI D3DXCreateTextureFromFileInMemoryEx(struct IDirect3DDevice9 *device, const void *srcdata,
         UINT srcdatasize, UINT width, UINT height, UINT miplevels, DWORD usage, D3DFORMAT format,
         D3DPOOL pool, DWORD filter, DWORD mipfilter, D3DCOLOR colorkey, D3DXIMAGE_INFO *srcinfo,
@@ -546,7 +570,7 @@ HRESULT WINAPI D3DXCreateTextureFromFileInMemoryEx(struct IDirect3DDevice9 *devi
     IDirect3DTexture9 **texptr;
     IDirect3DTexture9 *buftex;
     IDirect3DSurface9 *surface;
-    BOOL dynamic_texture;
+    BOOL dynamic_texture, format_specified = FALSE;
     D3DXIMAGE_INFO imginfo;
     UINT loaded_miplevels, skip_levels;
     D3DCAPS9 caps;
@@ -585,6 +609,8 @@ HRESULT WINAPI D3DXCreateTextureFromFileInMemoryEx(struct IDirect3DDevice9 *devi
 
     if (format == D3DFMT_UNKNOWN || format == D3DX_DEFAULT)
         format = imginfo.Format;
+    else
+        format_specified = TRUE;
 
     if (width == D3DX_FROM_FILE)
     {
@@ -629,6 +655,9 @@ HRESULT WINAPI D3DXCreateTextureFromFileInMemoryEx(struct IDirect3DDevice9 *devi
         *texture = NULL;
         return hr;
     }
+
+    if (colorkey && !format_specified)
+        format = get_alpha_replacement_format(format);
 
     if (imginfo.MipLevels < miplevels && (D3DFMT_DXT1 <= imginfo.Format && imginfo.Format <= D3DFMT_DXT5))
     {

@@ -4542,6 +4542,11 @@ static const struct message WmZOrder[] = {
     { 0 }
 };
 
+static void CALLBACK apc_test_proc(ULONG_PTR param)
+{
+    /* nothing */
+}
+
 static void test_MsgWaitForMultipleObjects(HWND hwnd)
 {
     DWORD ret;
@@ -4583,6 +4588,37 @@ static void test_MsgWaitForMultipleObjects(HWND hwnd)
     ok(msg.message == WM_USER, "got %04x instead of WM_USER\n", msg.message);
     ok(PeekMessageA( &msg, 0, 0, 0, PM_REMOVE ), "PeekMessage should succeed\n");
     ok(msg.message == WM_USER, "got %04x instead of WM_USER\n", msg.message);
+
+    /* MWMO_INPUTAVAILABLE should succeed even if the message was already seen */
+    PostMessageA( hwnd, WM_USER, 0, 0 );
+    ok(PeekMessageA( &msg, 0, 0, 0, PM_NOREMOVE ), "PeekMessage should succeed\n");
+    ok(msg.message == WM_USER, "got %04x instead of WM_USER\n", msg.message);
+
+    ret = MsgWaitForMultipleObjectsEx( 0, NULL, 0, QS_POSTMESSAGE, MWMO_INPUTAVAILABLE );
+    ok(ret == WAIT_OBJECT_0, "MsgWaitForMultipleObjectsEx returned %x\n", ret);
+
+    ok(PeekMessageA( &msg, 0, 0, 0, PM_REMOVE ), "PeekMessage should succeed\n");
+    ok(msg.message == WM_USER, "got %04x instead of WM_USER\n", msg.message);
+
+    /* without MWMO_ALERTABLE the result is never WAIT_IO_COMPLETION */
+    ret = QueueUserAPC( apc_test_proc, GetCurrentThread(), 0 );
+    ok(ret, "QueueUserAPC failed %u\n", GetLastError());
+
+    ret = MsgWaitForMultipleObjectsEx( 0, NULL, 0, QS_POSTMESSAGE, 0 );
+    ok(ret == WAIT_TIMEOUT, "MsgWaitForMultipleObjectsEx returned %x\n", ret);
+
+    /* but even with MWMO_ALERTABLE window events are preferred */
+    PostMessageA( hwnd, WM_USER, 0, 0 );
+
+    ret = MsgWaitForMultipleObjectsEx( 0, NULL, 0, QS_POSTMESSAGE, MWMO_ALERTABLE );
+    ok(ret == WAIT_OBJECT_0, "MsgWaitForMultipleObjectsEx returned %x\n", ret);
+
+    ok(PeekMessageA( &msg, 0, 0, 0, PM_REMOVE ), "PeekMessage should succeed\n");
+    ok(msg.message == WM_USER, "got %04x instead of WM_USER\n", msg.message);
+
+    /* the APC call is still queued */
+    ret = MsgWaitForMultipleObjectsEx( 0, NULL, 0, QS_POSTMESSAGE, MWMO_ALERTABLE );
+    ok(ret == WAIT_IO_COMPLETION, "MsgWaitForMultipleObjectsEx returned %x\n", ret);
 }
 
 /* test if we receive the right sequence of messages */
@@ -8412,6 +8448,13 @@ static void CALLBACK callback_count(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWOR
     count++;
 }
 
+static DWORD exception;
+static void CALLBACK callback_exception(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime)
+{
+    count++;
+    RaiseException(exception, 0, 0, NULL);
+}
+
 static DWORD WINAPI timer_thread_proc(LPVOID x)
 {
     struct timer_info *info = x;
@@ -8540,6 +8583,41 @@ static void test_timers_no_wnd(void)
        count, TIMER_COUNT_EXPECTED);
     KillTimer(NULL, id);
     /* Note: SetSystemTimer doesn't support a NULL window, see test_timers */
+}
+
+static void test_timers_exception(DWORD code)
+{
+    UINT_PTR id;
+    MSG msg;
+
+    exception = code;
+    id = SetTimer(NULL, 0, 1000, callback_exception);
+    ok(id != 0, "did not get id from SetTimer.\n");
+
+    memset(&msg, 0, sizeof(msg));
+    msg.message = WM_TIMER;
+    msg.wParam = id;
+    msg.lParam = (LPARAM)callback_exception;
+
+    count = 0;
+    DispatchMessageA(&msg);
+    ok(count == 1, "did not get one count as expected (%i).\n", count);
+
+    KillTimer(NULL, id);
+}
+
+static void test_timers_exceptions(void)
+{
+    test_timers_exception(EXCEPTION_ACCESS_VIOLATION);
+    test_timers_exception(EXCEPTION_DATATYPE_MISALIGNMENT);
+    test_timers_exception(EXCEPTION_BREAKPOINT);
+    test_timers_exception(EXCEPTION_SINGLE_STEP);
+    test_timers_exception(EXCEPTION_ARRAY_BOUNDS_EXCEEDED);
+    test_timers_exception(EXCEPTION_FLT_DENORMAL_OPERAND);
+    test_timers_exception(EXCEPTION_FLT_DIVIDE_BY_ZERO);
+    test_timers_exception(EXCEPTION_FLT_INEXACT_RESULT);
+    test_timers_exception(EXCEPTION_ILLEGAL_INSTRUCTION);
+    test_timers_exception(0xE000BEEF); /* customer exception */
 }
 
 /* Various win events with arbitrary parameters */
@@ -14583,6 +14661,7 @@ START_TEST(msg)
     test_accelerators();
     test_timers();
     test_timers_no_wnd();
+    test_timers_exceptions();
     if (hCBT_hook) test_set_hook();
     test_DestroyWindow();
     test_DispatchMessage();

@@ -52,6 +52,10 @@
 #include "wine/rbtree.h"
 #include "wine/wgl_driver.h"
 
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
+#endif
+
 /* Driver quirks */
 #define WINED3D_QUIRK_ARB_VS_OFFSET_LIMIT       0x00000001
 #define WINED3D_QUIRK_SET_TEXCOORD_W            0x00000002
@@ -139,6 +143,14 @@ static inline BOOL is_identity_fixup(struct color_fixup_desc fixup)
 static inline BOOL is_complex_fixup(struct color_fixup_desc fixup)
 {
     return fixup.x_source == CHANNEL_SOURCE_COMPLEX0 || fixup.x_source == CHANNEL_SOURCE_COMPLEX1;
+}
+
+static inline BOOL is_same_fixup(struct color_fixup_desc f1, struct color_fixup_desc f2)
+{
+    return f1.x_sign_fixup == f2.x_sign_fixup && f1.x_source == f2.x_source
+            && f1.y_sign_fixup == f2.y_sign_fixup && f1.y_source == f2.y_source
+            && f1.z_sign_fixup == f2.z_sign_fixup && f1.z_source == f2.z_source
+            && f1.w_sign_fixup == f2.w_sign_fixup && f1.w_source == f2.w_source;
 }
 
 static inline enum complex_fixup get_complex_fixup(struct color_fixup_desc fixup)
@@ -1502,6 +1514,7 @@ enum wined3d_pci_device
     CARD_NVIDIA_GEFORCE_GTX670      = 0x1189,
     CARD_NVIDIA_GEFORCE_GTX670MX    = 0x11a1,
     CARD_NVIDIA_GEFORCE_GTX680      = 0x1180,
+    CARD_NVIDIA_GEFORCE_GT750M      = 0x0fe9,
     CARD_NVIDIA_GEFORCE_GTX750      = 0x1381,
     CARD_NVIDIA_GEFORCE_GTX750TI    = 0x1380,
     CARD_NVIDIA_GEFORCE_GTX760      = 0x1187,
@@ -2879,6 +2892,7 @@ struct wined3d_shader
 
     struct wined3d_shader_signature_element input_signature[max(MAX_ATTRIBS, MAX_REG_INPUT)];
     struct wined3d_shader_signature_element output_signature[MAX_REG_OUTPUT];
+    char *signature_strings;
 
     /* Pointer to the parent device */
     struct wined3d_device *device;

@@ -295,16 +295,14 @@ static void init(void)
     HRESULT res;
 
     res = VarBstrFromBool(VARIANT_TRUE, LANG_USER_DEFAULT, VAR_LOCALBOOL, &bstr);
-    ok(res == S_OK && (lstrlenW(bstr) > 0),
-        "Expected localized string for 'True'\n");
+    ok(res == S_OK && bstr[0], "Expected localized string for 'True'\n");
     /* lstrcpyW / lstrcatW do not work on win95 */
     memcpy(sz12_true, sz12, sizeof(sz12));
     if (bstr) memcpy(&sz12_true[2], bstr, SysStringByteLen(bstr) + sizeof(WCHAR));
     SysFreeString(bstr);
 
     res = VarBstrFromBool(VARIANT_FALSE, LANG_USER_DEFAULT, VAR_LOCALBOOL, &bstr);
-    ok(res == S_OK && (lstrlenW(bstr) > 0),
-        "Expected localized string for 'False'\n");
+    ok(res == S_OK && bstr[0], "Expected localized string for 'False'\n");
     memcpy(sz12_false, sz12, sizeof(sz12));
     if (bstr) memcpy(&sz12_false[2], bstr, SysStringByteLen(bstr) + sizeof(WCHAR));
     SysFreeString(bstr);
@@ -7403,10 +7401,10 @@ static void test_VarPow(void)
     hres = pVarPow(&cy, &right, &result);
     if (hres == S_OK)
     {
-        ok(hres == S_OK && V_VT(&result) == VT_R8,
+        ok(V_VT(&result) == VT_R8,
            "VARPOW: expected coerced hres 0x%X type VT_R8, got hres 0x%X type %s!\n",
            S_OK, hres, vtstr(V_VT(&result)));
-        ok(hres == S_OK && EQ_DOUBLE(V_R8(&result), 4.0),
+        ok(EQ_DOUBLE(V_R8(&result), 4.0),
            "VARPOW: CY value %f, expected %f\n", V_R8(&result), 4.0);
     }
     else
@@ -7440,10 +7438,10 @@ static void test_VarPow(void)
     hres = pVarPow(&dec, &right, &result);
     if (hres == S_OK)
     {
-        ok(hres == S_OK && V_VT(&result) == VT_R8,
+        ok(V_VT(&result) == VT_R8,
            "VARPOW: expected coerced hres 0x%X type VT_R8, got hres 0x%X type %s!\n",
            S_OK, hres, vtstr(V_VT(&result)));
-        ok(hres == S_OK && EQ_DOUBLE(V_R8(&result), 4.0),
+        ok(EQ_DOUBLE(V_R8(&result), 4.0),
            "VARPOW: DECIMAL value %f, expected %f\n", V_R8(&result), 4.0);
     }
     else

@@ -912,7 +912,7 @@
 @ varargs _snprintf(ptr long str) MSVCRT__snprintf
 # stub _snprintf_c(ptr long str)
 # stub _snprintf_c_l(ptr long str ptr)
-# stub _snprintf_l(ptr long str ptr)
+@ varargs _snprintf_l(ptr long str ptr) MSVCRT__snprintf_l
 @ varargs _snprintf_s(ptr long long str) MSVCRT__snprintf_s
 # stub _snprintf_s_l(ptr long long str ptr)
 @ varargs _snscanf(str long str) MSVCRT__snscanf
@@ -983,7 +983,7 @@
 # stub _strtol_l(str ptr long ptr)
 @ cdecl -ret64 _strtoui64(str ptr long) MSVCRT_strtoui64
 @ cdecl -ret64 _strtoui64_l(str ptr long ptr) MSVCRT_strtoui64_l
-# stub _strtoul_l(str ptr long ptr)
+@ cdecl _strtoul_l(str ptr long ptr) MSVCRT_strtoul_l
 @ cdecl _strupr(str) MSVCRT__strupr
 @ cdecl _strupr_l(str ptr) MSVCRT__strupr_l
 @ cdecl _strupr_s(str long) MSVCRT__strupr_s
@@ -1113,7 +1113,7 @@
 @ cdecl _wcsncoll(wstr wstr long) MSVCRT__wcsncoll
 @ cdecl _wcsncoll_l(wstr wstr long ptr) MSVCRT__wcsncoll_l
 @ cdecl _wcsnicmp(wstr wstr long) MSVCRT__wcsnicmp
-# stub _wcsnicmp_l(wstr wstr long ptr)
+@ cdecl _wcsnicmp_l(wstr wstr long ptr) MSVCRT__wcsnicmp_l
 @ cdecl _wcsnicoll(wstr wstr long) MSVCRT__wcsnicoll
 @ cdecl _wcsnicoll_l(wstr wstr long ptr) MSVCRT__wcsnicoll_l
 @ cdecl _wcsnset(wstr long long) MSVCRT__wcsnset

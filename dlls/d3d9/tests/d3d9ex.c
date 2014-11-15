@@ -27,7 +27,7 @@
 #include <d3d9.h>
 
 static HMODULE d3d9_handle = 0;
-static DEVMODEW startup_mode;
+static DEVMODEW registry_mode;
 
 static HRESULT (WINAPI *pDirect3DCreate9Ex)(UINT SDKVersion, IDirect3D9Ex **d3d9ex);
 
@@ -132,18 +132,26 @@ done:
     return device;
 }
 
-static HRESULT reset_device(IDirect3DDevice9Ex *device, HWND device_window, BOOL windowed)
+static HRESULT reset_device(IDirect3DDevice9Ex *device, const struct device_desc *desc)
 {
     D3DPRESENT_PARAMETERS present_parameters = {0};
 
-    present_parameters.Windowed = windowed;
-    present_parameters.hDeviceWindow = device_window;
-    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    present_parameters.BackBufferWidth = 1024;
-    present_parameters.BackBufferHeight = 768;
+    present_parameters.BackBufferWidth = 640;
+    present_parameters.BackBufferHeight = 480;
     present_parameters.BackBufferFormat = D3DFMT_A8R8G8B8;
+    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    present_parameters.hDeviceWindow = NULL;
+    present_parameters.Windowed = TRUE;
     present_parameters.EnableAutoDepthStencil = TRUE;
     present_parameters.AutoDepthStencilFormat = D3DFMT_D24S8;
+
+    if (desc)
+    {
+        present_parameters.BackBufferWidth = desc->width;
+        present_parameters.BackBufferHeight = desc->height;
+        present_parameters.hDeviceWindow = desc->device_window;
+        present_parameters.Windowed = !(desc->flags & CREATE_DEVICE_FULLSCREEN);
+    }
 
     return IDirect3DDevice9_Reset(device, &present_parameters);
 }
@@ -1110,7 +1118,7 @@ static void test_reset_resources(void)
         IDirect3DSurface9_Release(surface);
     }
 
-    hr = reset_device(device, window, TRUE);
+    hr = reset_device(device, NULL);
     ok(SUCCEEDED(hr), "Failed to reset device.\n");
 
     hr = IDirect3DDevice9_GetBackBuffer(device, 0, 0, D3DBACKBUFFER_TYPE_MONO, &rt);
@@ -1284,7 +1292,9 @@ static void test_lost_device(void)
     hr = IDirect3DDevice9Ex_CheckDeviceState(device, NULL);
     ok(hr == S_PRESENT_OCCLUDED, "Got unexpected hr %#x.\n", hr);
 
-    hr = reset_device(device, window, FALSE);
+    desc.width = 1024;
+    desc.height = 768;
+    hr = reset_device(device, &desc);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
@@ -1297,7 +1307,8 @@ static void test_lost_device(void)
     hr = IDirect3DDevice9Ex_CheckDeviceState(device, NULL);
     ok(hr == S_PRESENT_OCCLUDED, "Got unexpected hr %#x.\n", hr);
 
-    hr = reset_device(device, window, TRUE);
+    desc.flags = 0;
+    hr = reset_device(device, &desc);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
@@ -1310,7 +1321,7 @@ static void test_lost_device(void)
     hr = IDirect3DDevice9Ex_CheckDeviceState(device, NULL);
     todo_wine ok(hr == S_PRESENT_MODE_CHANGED, "Got unexpected hr %#x.\n", hr);
 
-    hr = reset_device(device, window, TRUE);
+    hr = reset_device(device, &desc);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
@@ -1349,7 +1360,8 @@ static void test_lost_device(void)
     hr = IDirect3DDevice9Ex_CheckDeviceState(device, NULL);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
 
-    hr = reset_device(device, window, FALSE);
+    desc.flags = CREATE_DEVICE_FULLSCREEN;
+    hr = reset_device(device, &desc);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDirect3DDevice9Ex_TestCooperativeLevel(device);
     ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
@@ -1744,8 +1756,8 @@ static DWORD WINAPI wndproc_thread(void *param)
     BOOL ret;
 
     p->dummy_window = CreateWindowA("d3d9_test_wndproc_wc", "d3d9_test",
-            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, startup_mode.dmPelsWidth,
-            startup_mode.dmPelsHeight, 0, 0, 0, 0);
+            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, registry_mode.dmPelsWidth,
+            registry_mode.dmPelsHeight, 0, 0, 0, 0);
     p->running_in_foreground = SetForegroundWindow(p->dummy_window);
 
     ret = SetEvent(p->window_created);
@@ -1802,11 +1814,11 @@ static void test_wndproc(void)
     ok(!!thread_params.test_finished, "CreateEvent failed, last error %#x.\n", GetLastError());
 
     focus_window = CreateWindowA("d3d9_test_wndproc_wc", "d3d9_test",
-            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, startup_mode.dmPelsWidth,
-            startup_mode.dmPelsHeight, 0, 0, 0, 0);
+            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, registry_mode.dmPelsWidth,
+            registry_mode.dmPelsHeight, 0, 0, 0, 0);
     device_window = CreateWindowA("d3d9_test_wndproc_wc", "d3d9_test",
-            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, startup_mode.dmPelsWidth,
-            startup_mode.dmPelsHeight, 0, 0, 0, 0);
+            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, registry_mode.dmPelsWidth,
+            registry_mode.dmPelsHeight, 0, 0, 0, 0);
     thread = CreateThread(NULL, 0, wndproc_thread, &thread_params, 0, &tid);
     ok(!!thread, "Failed to create thread, last error %#x.\n", GetLastError());
 
@@ -1839,8 +1851,8 @@ static void test_wndproc(void)
     expect_messages = messages;
 
     device_desc.device_window = device_window;
-    device_desc.width = startup_mode.dmPelsWidth;
-    device_desc.height = startup_mode.dmPelsHeight;
+    device_desc.width = registry_mode.dmPelsWidth;
+    device_desc.height = registry_mode.dmPelsHeight;
     device_desc.flags = CREATE_DEVICE_FULLSCREEN;
     if (!(device = create_device(focus_window, &device_desc)))
     {
@@ -1869,8 +1881,7 @@ static void test_wndproc(void)
             (LONG_PTR)test_proc, proc);
 
     proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
-    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx.\n", (LONG_PTR)test_proc);
 
     ref = IDirect3DDevice9Ex_Release(device);
     ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);
@@ -1897,8 +1908,7 @@ static void test_wndproc(void)
     }
 
     proc = SetWindowLongPtrA(focus_window, GWLP_WNDPROC, (LONG_PTR)DefWindowProcA);
-    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx.\n", (LONG_PTR)test_proc);
 
     ref = IDirect3DDevice9Ex_Release(device);
     ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);
@@ -1944,11 +1954,11 @@ static void test_wndproc_windowed(void)
     ok(!!thread_params.test_finished, "CreateEvent failed, last error %#x.\n", GetLastError());
 
     focus_window = CreateWindowA("d3d9_test_wndproc_wc", "d3d9_test",
-            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, startup_mode.dmPelsWidth,
-            startup_mode.dmPelsHeight, 0, 0, 0, 0);
+            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, registry_mode.dmPelsWidth,
+            registry_mode.dmPelsHeight, 0, 0, 0, 0);
     device_window = CreateWindowA("d3d9_test_wndproc_wc", "d3d9_test",
-            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, startup_mode.dmPelsWidth,
-            startup_mode.dmPelsHeight, 0, 0, 0, 0);
+            WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION, 0, 0, registry_mode.dmPelsWidth,
+            registry_mode.dmPelsHeight, 0, 0, 0, 0);
     thread = CreateThread(NULL, 0, wndproc_thread, &thread_params, 0, &tid);
     ok(!!thread, "Failed to create thread, last error %#x.\n", GetLastError());
 
@@ -1979,8 +1989,8 @@ static void test_wndproc_windowed(void)
     filter_messages = focus_window;
 
     device_desc.device_window = device_window;
-    device_desc.width = 640;
-    device_desc.height = 480;
+    device_desc.width = registry_mode.dmPelsWidth;
+    device_desc.height = registry_mode.dmPelsHeight;
     device_desc.flags = 0;
     if (!(device = create_device(focus_window, &device_desc)))
     {
@@ -2004,7 +2014,8 @@ static void test_wndproc_windowed(void)
 
     filter_messages = NULL;
 
-    hr = reset_device(device, device_window, FALSE);
+    device_desc.flags = CREATE_DEVICE_FULLSCREEN;
+    hr = reset_device(device, &device_desc);
     ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
 
     proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
@@ -2012,10 +2023,10 @@ static void test_wndproc_windowed(void)
             (LONG_PTR)test_proc, proc);
 
     proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
-    ok(proc != (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx.\n", (LONG_PTR)test_proc);
 
-    hr = reset_device(device, device_window, TRUE);
+    device_desc.flags = 0;
+    hr = reset_device(device, &device_desc);
     ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
 
     proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
@@ -2042,7 +2053,8 @@ static void test_wndproc_windowed(void)
 
     filter_messages = NULL;
 
-    hr = reset_device(device, focus_window, FALSE);
+    device_desc.flags = CREATE_DEVICE_FULLSCREEN;
+    hr = reset_device(device, &device_desc);
     ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
 
     proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
@@ -2050,10 +2062,10 @@ static void test_wndproc_windowed(void)
             (LONG_PTR)test_proc, proc);
 
     proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
-    ok(proc != (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx.\n", (LONG_PTR)test_proc);
 
-    hr = reset_device(device, focus_window, TRUE);
+    device_desc.flags = 0;
+    hr = reset_device(device, &device_desc);
     ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
 
     proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
@@ -2078,7 +2090,8 @@ static void test_wndproc_windowed(void)
 
     filter_messages = NULL;
 
-    hr = reset_device(device, device_window, FALSE);
+    device_desc.flags = CREATE_DEVICE_FULLSCREEN;
+    hr = reset_device(device, &device_desc);
     ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
 
     proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
@@ -2086,10 +2099,10 @@ static void test_wndproc_windowed(void)
             (LONG_PTR)test_proc, proc);
 
     proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
-    ok(proc != (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx.\n", (LONG_PTR)test_proc);
 
-    hr = reset_device(device, device_window, TRUE);
+    device_desc.flags = 0;
+    hr = reset_device(device, &device_desc);
     ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
 
     proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
@@ -2143,14 +2156,14 @@ static void test_window_style(void)
     };
     unsigned int i;
 
-    SetRect(&fullscreen_rect, 0, 0, startup_mode.dmPelsWidth, startup_mode.dmPelsHeight);
+    SetRect(&fullscreen_rect, 0, 0, registry_mode.dmPelsWidth, registry_mode.dmPelsHeight);
 
     for (i = 0; i < sizeof(tests) / sizeof(*tests); ++i)
     {
         focus_window = CreateWindowA("d3d9_test_wc", "d3d9_test", WS_OVERLAPPEDWINDOW | tests[i].style_flags,
-                0, 0, startup_mode.dmPelsWidth / 2, startup_mode.dmPelsHeight / 2, 0, 0, 0, 0);
+                0, 0, registry_mode.dmPelsWidth / 2, registry_mode.dmPelsHeight / 2, 0, 0, 0, 0);
         device_window = CreateWindowA("d3d9_test_wc", "d3d9_test", WS_OVERLAPPEDWINDOW | tests[i].style_flags,
-                0, 0, startup_mode.dmPelsWidth / 2, startup_mode.dmPelsHeight / 2, 0, 0, 0, 0);
+                0, 0, registry_mode.dmPelsWidth / 2, registry_mode.dmPelsHeight / 2, 0, 0, 0, 0);
 
         device_style = GetWindowLongA(device_window, GWL_STYLE);
         device_exstyle = GetWindowLongA(device_window, GWL_EXSTYLE);
@@ -2161,8 +2174,8 @@ static void test_window_style(void)
         GetWindowRect(device_window, &device_rect);
 
         device_desc.device_window = device_window;
-        device_desc.width = startup_mode.dmPelsWidth;
-        device_desc.height = startup_mode.dmPelsHeight;
+        device_desc.width = registry_mode.dmPelsWidth;
+        device_desc.height = registry_mode.dmPelsHeight;
         device_desc.flags = CREATE_DEVICE_FULLSCREEN | tests[i].device_flags;
         if (!(device = create_device(focus_window, &device_desc)))
         {
@@ -2202,7 +2215,8 @@ static void test_window_style(void)
                 focus_rect.left, focus_rect.top, focus_rect.right, focus_rect.bottom,
                 r.left, r.top, r.right, r.bottom, i);
 
-        hr = reset_device(device, device_window, TRUE);
+        device_desc.flags = 0;
+        hr = reset_device(device, &device_desc);
         ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
 
         style = GetWindowLongA(device_window, GWL_STYLE);
@@ -2233,6 +2247,8 @@ static void test_window_style(void)
 
 START_TEST(d3d9ex)
 {
+    DEVMODEW current_mode;
+
     d3d9_handle = LoadLibraryA("d3d9.dll");
     if (!d3d9_handle)
     {
@@ -2246,9 +2262,17 @@ START_TEST(d3d9ex)
         return;
     }
 
-    startup_mode.dmSize = sizeof(startup_mode);
-    ok(EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &startup_mode),
-            "Failed to get display mode.\n");
+    memset(&current_mode, 0, sizeof(current_mode));
+    current_mode.dmSize = sizeof(current_mode);
+    ok(EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &current_mode), "Failed to get display mode.\n");
+    registry_mode.dmSize = sizeof(registry_mode);
+    ok(EnumDisplaySettingsW(NULL, ENUM_REGISTRY_SETTINGS, &registry_mode), "Failed to get display mode.\n");
+    if (current_mode.dmPelsWidth != registry_mode.dmPelsWidth
+            || current_mode.dmPelsHeight != registry_mode.dmPelsHeight)
+    {
+        skip("Current mode does not match registry mode, skipping test.\n");
+        return;
+    }
 
     test_qi_base_to_ex();
     test_qi_ex_to_base();

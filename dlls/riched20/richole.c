@@ -52,8 +52,10 @@ typedef struct IOleClientSiteImpl IOleClientSiteImpl;
 typedef struct ITextRangeImpl ITextRangeImpl;
 
 typedef struct IRichEditOleImpl {
+    IUnknown IUnknown_inner;
     IRichEditOle IRichEditOle_iface;
     ITextDocument ITextDocument_iface;
+    IUnknown *outer_unk;
     LONG ref;
 
     ME_TextEditor *editor;
@@ -95,61 +97,82 @@ static inline IRichEditOleImpl *impl_from_ITextDocument(ITextDocument *iface)
     return CONTAINING_RECORD(iface, IRichEditOleImpl, ITextDocument_iface);
 }
 
-static HRESULT WINAPI
-IRichEditOle_fnQueryInterface(IRichEditOle *me, REFIID riid, LPVOID *ppvObj)
+static inline IRichEditOleImpl *impl_from_IUnknown(IUnknown *iface)
 {
-    IRichEditOleImpl *This = impl_from_IRichEditOle(me);
+    return CONTAINING_RECORD(iface, IRichEditOleImpl, IUnknown_inner);
+}
 
-    TRACE("%p %s\n", This, debugstr_guid(riid) );
+static HRESULT WINAPI IRichEditOleImpl_inner_fnQueryInterface(IUnknown *iface, REFIID riid, LPVOID *ppvObj)
+{
+    IRichEditOleImpl *This = impl_from_IUnknown(iface);
+
+    TRACE("%p %s\n", This, debugstr_guid(riid));
 
     *ppvObj = NULL;
-    if (IsEqualGUID(riid, &IID_IUnknown) ||
-        IsEqualGUID(riid, &IID_IRichEditOle))
+    if (IsEqualGUID(riid, &IID_IUnknown))
+        *ppvObj = &This->IUnknown_inner;
+    else if (IsEqualGUID(riid, &IID_IRichEditOle))
         *ppvObj = &This->IRichEditOle_iface;
     else if (IsEqualGUID(riid, &IID_ITextDocument))
         *ppvObj = &This->ITextDocument_iface;
     if (*ppvObj)
     {
-        IRichEditOle_AddRef(me);
+        IUnknown_AddRef((IUnknown *)*ppvObj);
         return S_OK;
     }
-    FIXME("%p: unhandled interface %s\n", This, debugstr_guid(riid) );
+    FIXME("%p: unhandled interface %s\n", This, debugstr_guid(riid));
  
     return E_NOINTERFACE;   
 }
 
-static ULONG WINAPI
-IRichEditOle_fnAddRef(IRichEditOle *me)
+static ULONG WINAPI IRichEditOleImpl_inner_fnAddRef(IUnknown *iface)
 {
-    IRichEditOleImpl *This = impl_from_IRichEditOle(me);
-    ULONG ref = InterlockedIncrement( &This->ref );
+    IRichEditOleImpl *This = impl_from_IUnknown(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
 
     TRACE("%p ref = %u\n", This, ref);
 
     return ref;
 }
 
-static ULONG WINAPI
-IRichEditOle_fnRelease(IRichEditOle *me)
+static ULONG WINAPI IRichEditOleImpl_inner_fnRelease(IUnknown *iface)
 {
-    IRichEditOleImpl *This = impl_from_IRichEditOle(me);
+    IRichEditOleImpl *This = impl_from_IUnknown(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
     TRACE ("%p ref=%u\n", This, ref);
 
     if (!ref)
-    {
-        ITextRangeImpl *txtRge;
-        TRACE ("Destroying %p\n", This);
-        This->txtSel->reOle = NULL;
-        This->editor->reOle = NULL;
-        ITextSelection_Release(&This->txtSel->ITextSelection_iface);
-        IOleClientSite_Release(&This->clientSite->IOleClientSite_iface);
-        LIST_FOR_EACH_ENTRY(txtRge, &This->rangelist, ITextRangeImpl, entry)
-            txtRge->reOle = NULL;
-        heap_free(This);
-    }
+        DestroyIRichEditOle(&This->IRichEditOle_iface);
     return ref;
+}
+
+static const IUnknownVtbl reo_unk_vtbl =
+{
+    IRichEditOleImpl_inner_fnQueryInterface,
+    IRichEditOleImpl_inner_fnAddRef,
+    IRichEditOleImpl_inner_fnRelease
+};
+
+static HRESULT WINAPI
+IRichEditOle_fnQueryInterface(IRichEditOle *me, REFIID riid, LPVOID *ppvObj)
+{
+    IRichEditOleImpl *This = impl_from_IRichEditOle(me);
+    return IUnknown_QueryInterface(This->outer_unk, riid, ppvObj);
+}
+
+static ULONG WINAPI
+IRichEditOle_fnAddRef(IRichEditOle *me)
+{
+    IRichEditOleImpl *This = impl_from_IRichEditOle(me);
+    return IUnknown_AddRef(This->outer_unk);
+}
+
+static ULONG WINAPI
+IRichEditOle_fnRelease(IRichEditOle *me)
+{
+    IRichEditOleImpl *This = impl_from_IRichEditOle(me);
+    return IUnknown_Release(This->outer_unk);
 }
 
 static HRESULT WINAPI
@@ -2305,7 +2328,7 @@ CreateTextSelection(IRichEditOleImpl *reOle)
     return txtSel;
 }
 
-LRESULT CreateIRichEditOle(ME_TextEditor *editor, LPVOID *ppObj)
+LRESULT CreateIRichEditOle(IUnknown *outer_unk, ME_TextEditor *editor, LPVOID *ppvObj)
 {
     IRichEditOleImpl *reo;
 
@@ -2313,6 +2336,7 @@ LRESULT CreateIRichEditOle(ME_TextEditor *editor, LPVOID *ppObj)
     if (!reo)
         return 0;
 
+    reo->IUnknown_inner.lpVtbl = &reo_unk_vtbl;
     reo->IRichEditOle_iface.lpVtbl = &revt;
     reo->ITextDocument_iface.lpVtbl = &tdvt;
     reo->ref = 1;
@@ -2331,10 +2355,29 @@ LRESULT CreateIRichEditOle(ME_TextEditor *editor, LPVOID *ppObj)
         return 0;
     }
     TRACE("Created %p\n",reo);
-    *ppObj = reo;
     list_init(&reo->rangelist);
+    if (outer_unk)
+        reo->outer_unk = outer_unk;
+    else
+        reo->outer_unk = &reo->IUnknown_inner;
+    *ppvObj = &reo->IRichEditOle_iface;
 
     return 1;
+}
+
+void DestroyIRichEditOle(IRichEditOle *iface)
+{
+    IRichEditOleImpl *This = impl_from_IRichEditOle(iface);
+    ITextRangeImpl *txtRge;
+
+    TRACE("Destroying %p\n", This);
+    This->txtSel->reOle = NULL;
+    This->editor->reOle = NULL;
+    ITextSelection_Release(&This->txtSel->ITextSelection_iface);
+    IOleClientSite_Release(&This->clientSite->IOleClientSite_iface);
+    LIST_FOR_EACH_ENTRY(txtRge, &This->rangelist, ITextRangeImpl, entry)
+        txtRge->reOle = NULL;
+    heap_free(This);
 }
 
 static void convert_sizel(const ME_Context *c, const SIZEL* szl, SIZE* sz)
@@ -2539,4 +2582,10 @@ void ME_CopyReObject(REOBJECT* dst, const REOBJECT* src)
     if (dst->poleobj)   IOleObject_AddRef(dst->poleobj);
     if (dst->pstg)      IStorage_AddRef(dst->pstg);
     if (dst->polesite)  IOleClientSite_AddRef(dst->polesite);
+}
+
+void ME_GetITextDocumentInterface(IRichEditOle *iface, LPVOID *ppvObj)
+{
+    IRichEditOleImpl *This = impl_from_IRichEditOle(iface);
+    *ppvObj = &This->ITextDocument_iface;
 }

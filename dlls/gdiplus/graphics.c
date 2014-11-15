@@ -827,6 +827,10 @@ static void get_bitmap_sample_size(InterpolationMode interpolation, WrapMode wra
             right = bitmap->width-1;
         if (bottom >= bitmap->height)
             bottom = bitmap->height-1;
+        if (bottom < top || right < left)
+            /* entirely outside image, just sample a pixel so we don't have to
+             * special-case this later */
+            left = top = right = bottom = 0;
     }
     else
     {
@@ -1779,7 +1783,7 @@ static GpStatus draw_poly(GpGraphics *graphics, GpPen *pen, GDIPCONST GpPointF *
     for(i = 1; i < count; i++){
         if((types[i] & PathPointTypePathTypeMask) == PathPointTypeBezier){
             if((i + 2 >= count) || !(types[i + 1] & PathPointTypeBezier)
-                || !(types[i + 1] & PathPointTypeBezier)){
+                || !(types[i + 2] & PathPointTypeBezier)){
                 ERR("Bad bezier points\n");
                 goto end;
             }

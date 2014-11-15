@@ -88,7 +88,7 @@ static void verify_reg_(unsigned line, HKEY hkey, const char* value,
 
 static void test_add(void)
 {
-    HKEY hkey;
+    HKEY hkey, subkey;
     LONG err;
     DWORD r, dword, type, size;
     char buffer[22];
@@ -107,6 +107,49 @@ static void test_add(void)
 
     err = RegOpenKeyExA(HKEY_CURRENT_USER, KEY_BASE, 0, KEY_READ, &hkey);
     ok(err == ERROR_SUCCESS, "key creation failed, got %d\n", err);
+
+    /* Test empty type */
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /v emptyType /t \"\" /d WineTest /f", &r);
+    todo_wine ok(r == REG_EXIT_SUCCESS || broken(r == REG_EXIT_FAILURE /* WinXP */),
+        "got exit code %u\n", r);
+    if (r == REG_EXIT_SUCCESS)
+        todo_wine verify_reg(hkey, "emptyType", REG_SZ, "", 1, 0);
+    else
+        todo_wine win_skip("broken reg.exe detected\n");
+
+    /* Test input key formats */
+    run_reg_exe("reg add \\HKCU\\" KEY_BASE "\\keytest0 /f", &r);
+    ok(r == REG_EXIT_FAILURE, "got exit code %u\n", r);
+    err = RegDeleteKeyA(HKEY_CURRENT_USER, KEY_BASE "\\keytest0");
+    ok(err == ERROR_FILE_NOT_FOUND, "got exit code %d\n", r);
+
+    run_reg_exe("reg add \\\\HKCU\\" KEY_BASE "\\keytest1 /f", &r);
+    ok(r == REG_EXIT_FAILURE, "got exit code %u\n", r);
+    err = RegDeleteKeyA(HKEY_CURRENT_USER, KEY_BASE "\\keytest1");
+    ok(err == ERROR_FILE_NOT_FOUND, "got exit code %d\n", r);
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE "\\keytest2\\\\ /f", &r);
+    todo_wine ok(r == REG_EXIT_FAILURE || broken(r == REG_EXIT_SUCCESS /* WinXP */),
+        "got exit code %u\n", r);
+    err = RegDeleteKeyA(HKEY_CURRENT_USER, KEY_BASE "\\keytest2");
+    todo_wine ok(err == ERROR_FILE_NOT_FOUND || broken(err == ERROR_SUCCESS /* WinXP */),
+        "got exit code %d\n", r);
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE "\\keytest3\\ /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    err = RegOpenKeyExA(HKEY_CURRENT_USER, KEY_BASE "\\keytest3", 0, KEY_READ, &subkey);
+    ok(err == ERROR_SUCCESS, "key creation failed, got %d\n", err);
+    RegCloseKey(subkey);
+    err = RegDeleteKeyA(HKEY_CURRENT_USER, KEY_BASE "\\keytest3");
+    ok(err == ERROR_SUCCESS, "got exit code %d\n", r);
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE "\\keytest4 /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    err = RegOpenKeyExA(HKEY_CURRENT_USER, KEY_BASE "\\keytest4", 0, KEY_READ, &subkey);
+    ok(err == ERROR_SUCCESS, "key creation failed, got %d\n", err);
+    RegCloseKey(subkey);
+    err = RegDeleteKeyA(HKEY_CURRENT_USER, KEY_BASE "\\keytest4");
+    ok(err == ERROR_SUCCESS, "got exit code %d\n", r);
 
     /* REG_SZ */
     run_reg_exe("reg add HKCU\\" KEY_BASE " /d WineTest /f", &r);
@@ -190,6 +233,10 @@ static void test_add(void)
     todo_wine ok(size == 6, "got wrong size %u\n", size);
     todo_wine ok(memcmp(buffer, buffer+12, 6) == 0 ||
         broken(memcmp(buffer+6, buffer+12, 6) == 0 /* WinXP */), "got wrong data\n");
+
+    run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_BINARY /v bin5 /d \"\" /f", &r);
+    ok(r == REG_EXIT_SUCCESS, "got exit code %u\n", r);
+    verify_reg(hkey, "bin5", REG_BINARY, buffer, 0, 0);
 
     /* REG_DWORD */
     run_reg_exe("reg add HKCU\\" KEY_BASE " /t REG_DWORD /f /d 12345678", &r);
@@ -349,6 +396,9 @@ static void test_delete(void)
     ok(r == REG_EXIT_SUCCESS, "got exit code %d, expected 0\n", r);
     err = RegOpenKeyExA(HKEY_CURRENT_USER, KEY_BASE, 0, KEY_READ, &hkey);
     ok(err == ERROR_FILE_NOT_FOUND, "got %d\n", err);
+
+    run_reg_exe("reg delete HKCU\\" KEY_BASE " /f", &r);
+    ok(r == REG_EXIT_FAILURE, "got exit code %u\n", r);
 }
 
 static void test_query(void)

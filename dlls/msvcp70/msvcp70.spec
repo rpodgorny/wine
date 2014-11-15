@@ -2103,9 +2103,9 @@
 @ stub ?_Isinf@?$_Ctraits@M@std@@SA_NM@Z
 @ stub ?_Isinf@?$_Ctraits@N@std@@SA_NN@Z
 @ stub ?_Isinf@?$_Ctraits@O@std@@SA_NO@Z
-@ stub ?_Isnan@?$_Ctraits@M@std@@SA_NM@Z
-@ stub ?_Isnan@?$_Ctraits@N@std@@SA_NN@Z
-@ stub ?_Isnan@?$_Ctraits@O@std@@SA_NO@Z
+@ cdecl ?_Isnan@?$_Ctraits@M@std@@SA_NM@Z(float) std_Ctraits_float__Isnan
+@ cdecl ?_Isnan@?$_Ctraits@N@std@@SA_NN@Z(double) std_Ctraits_double__Isnan
+@ cdecl ?_Isnan@?$_Ctraits@O@std@@SA_NO@Z(double) std_Ctraits_long_double__Isnan
 @ stub -arch=win32 ?_Loc_atexit@std@@YA_NP6AXXZ@Z
 @ stub -arch=win32 ?_Makpat@?$_Mpunct@D@std@@AAEXAAUpattern@money_base@2@III@Z
 @ stub -arch=win64 ?_Makpat@?$_Mpunct@D@std@@AEAAXAEAUpattern@money_base@2@III@Z
@@ -2855,11 +2855,12 @@
 @ cdecl -arch=win64 ?do_is@?$ctype@_W@std@@MEBAPEB_WPEB_W0PEAF@Z(ptr ptr ptr ptr) ctype_wchar_do_is
 @ thiscall -arch=i386 ?do_is@?$ctype@_W@std@@MBE_NF_W@Z(ptr long long) ctype_wchar_do_is_ch
 @ cdecl -arch=win64 ?do_is@?$ctype@_W@std@@MEBA_NF_W@Z(ptr long long) ctype_wchar_do_is_ch
-@ stub -arch=win32 ?do_length@?$codecvt@DDH@std@@MBEHAAHPBD1I@Z
-@ stub -arch=win64 ?do_length@?$codecvt@DDH@std@@MEBAHAEAHPEBD1_K@Z
+@ thiscall -arch=i386 ?do_length@?$codecvt@DDH@std@@MBEHAAHPBD1I@Z(ptr ptr str str long) codecvt_char_do_length
+@ cdecl -arch=win64 ?do_length@?$codecvt@DDH@std@@MEBAHAEAHPEBD1_K@Z(ptr ptr str str long) codecvt_char_do_length
 @ thiscall -arch=win32 ?do_length@?$codecvt@DDH@std@@MBEHABHPBD1I@Z(ptr ptr str str long) codecvt_char_do_length
 @ cdecl -arch=win64 ?do_length@?$codecvt@DDH@std@@MEBAHAEBHPEBD1_K@Z(ptr ptr str str long) codecvt_char_do_length
-@ stub -arch=win32 ?do_length@?$codecvt@GDH@std@@MBEHAAHPBD1I@Z
+@ thiscall -arch=i386  ?do_length@?$codecvt@GDH@std@@MBEHAAHPBD1I@Z(ptr ptr str str long) codecvt_wchar_do_length
+@ cdecl -arch=win64 ?do_length@?$codecvt@GDH@std@@MEBAHAEAHPEBD1_K@Z(ptr ptr str str long) codecvt_wchar_do_length
 @ thiscall -arch=win32 ?do_length@?$codecvt@GDH@std@@MBEHABHPBD1I@Z(ptr ptr str str long) codecvt_wchar_do_length
 @ cdecl -arch=win64 ?do_length@?$codecvt@GDH@std@@MEBAHAEBHPEBD1_K@Z(ptr ptr str str long) codecvt_wchar_do_length
 @ thiscall -arch=win32 ?do_length@?$codecvt@_WDH@std@@MBEHABHPBD1I@Z(ptr ptr str str long) codecvt_wchar_do_length

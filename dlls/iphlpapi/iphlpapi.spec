@@ -8,7 +8,7 @@
 @ stdcall AllocateAndGetTcpTableFromStack( ptr long long long )
 @ stdcall AllocateAndGetUdpTableFromStack( ptr long long long )
 @ stdcall CancelIPChangeNotify( ptr )
-#@ stub CancelMibChangeNotify2
+@ stdcall CancelMibChangeNotify2( ptr )
 #@ stub ConvertGuidToStringA
 #@ stub ConvertGuidToStringW
 #@ stub ConvertInterfaceAliasToLuid
@@ -233,7 +233,7 @@
 @ stub NhpAllocateAndGetInterfaceInfoFromStack
 @ stub NhpGetInterfaceIndexFromStack
 @ stdcall NotifyAddrChange( ptr ptr )
-#@ stub NotifyIpInterfaceChange
+@ stdcall NotifyIpInterfaceChange( long ptr ptr long ptr )
 @ stdcall NotifyRouteChange( ptr ptr )
 #@ stub NotifyRouteChange2
 @ stub NotifyRouteChangeEx

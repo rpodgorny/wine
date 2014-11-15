@@ -66,7 +66,10 @@ static ULONG STDMETHODCALLTYPE d2d_gradient_Release(ID2D1GradientStopCollection 
     TRACE("%p decreasing refcount to %u.\n", iface, refcount);
 
     if (!refcount)
+    {
+        HeapFree(GetProcessHeap(), 0, gradient->stops);
         HeapFree(GetProcessHeap(), 0, gradient);
+    }
 
     return refcount;
 }
@@ -80,15 +83,23 @@ static void STDMETHODCALLTYPE d2d_gradient_GetFactory(ID2D1GradientStopCollectio
 
 static UINT32 STDMETHODCALLTYPE d2d_gradient_GetGradientStopCount(ID2D1GradientStopCollection *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d2d_gradient *gradient = impl_from_ID2D1GradientStopCollection(iface);
 
-    return 0;
+    TRACE("iface %p.\n", iface);
+
+    return gradient->stop_count;
 }
 
 static void STDMETHODCALLTYPE d2d_gradient_GetGradientStops(ID2D1GradientStopCollection *iface,
         D2D1_GRADIENT_STOP *stops, UINT32 stop_count)
 {
-    FIXME("iface %p, stops %p, stop_count %u stub!\n", iface, stops, stop_count);
+    struct d2d_gradient *gradient = impl_from_ID2D1GradientStopCollection(iface);
+
+    TRACE("iface %p, stops %p, stop_count %u.\n", iface, stops, stop_count);
+
+    memcpy(stops, gradient->stops, min(gradient->stop_count, stop_count) * sizeof(*stops));
+    if (stop_count > gradient->stop_count)
+        memset(stops, 0, (stop_count - gradient->stop_count) * sizeof(*stops));
 }
 
 static D2D1_GAMMA STDMETHODCALLTYPE d2d_gradient_GetColorInterpolationGamma(ID2D1GradientStopCollection *iface)
@@ -117,20 +128,29 @@ static const struct ID2D1GradientStopCollectionVtbl d2d_gradient_vtbl =
     d2d_gradient_GetExtendMode,
 };
 
-void d2d_gradient_init(struct d2d_gradient *gradient, ID2D1RenderTarget *render_target,
+HRESULT d2d_gradient_init(struct d2d_gradient *gradient, ID2D1RenderTarget *render_target,
         const D2D1_GRADIENT_STOP *stops, UINT32 stop_count, D2D1_GAMMA gamma, D2D1_EXTEND_MODE extend_mode)
 {
     FIXME("Ignoring gradient properties.\n");
 
     gradient->ID2D1GradientStopCollection_iface.lpVtbl = &d2d_gradient_vtbl;
     gradient->refcount = 1;
+
+    gradient->stop_count = stop_count;
+    if (!(gradient->stops = HeapAlloc(GetProcessHeap(), 0, stop_count * sizeof(*stops))))
+        return E_OUTOFMEMORY;
+    memcpy(gradient->stops, stops, stop_count * sizeof(*stops));
+
+    return S_OK;
 }
 
 static void d2d_brush_init(struct d2d_brush *brush, ID2D1RenderTarget *render_target,
-        const D2D1_BRUSH_PROPERTIES *desc, const struct ID2D1BrushVtbl *vtbl)
+        enum d2d_brush_type type, const D2D1_BRUSH_PROPERTIES *desc, const struct ID2D1BrushVtbl *vtbl)
 {
     brush->ID2D1Brush_iface.lpVtbl = vtbl;
     brush->refcount = 1;
+    brush->opacity = desc ? desc->opacity : 1.0f;
+    brush->type = type;
 }
 
 static inline struct d2d_brush *impl_from_ID2D1SolidColorBrush(ID2D1SolidColorBrush *iface)
@@ -191,7 +211,11 @@ static void STDMETHODCALLTYPE d2d_solid_color_brush_GetFactory(ID2D1SolidColorBr
 
 static void STDMETHODCALLTYPE d2d_solid_color_brush_SetOpacity(ID2D1SolidColorBrush *iface, float opacity)
 {
-    FIXME("iface %p, opacity %.8e stub!\n", iface, opacity);
+    struct d2d_brush *brush = impl_from_ID2D1SolidColorBrush(iface);
+
+    TRACE("iface %p, opacity %.8e.\n", iface, opacity);
+
+    brush->opacity = opacity;
 }
 
 static void STDMETHODCALLTYPE d2d_solid_color_brush_SetTransform(ID2D1SolidColorBrush *iface,
@@ -224,16 +248,20 @@ static void STDMETHODCALLTYPE d2d_solid_color_brush_GetTransform(ID2D1SolidColor
 
 static void STDMETHODCALLTYPE d2d_solid_color_brush_SetColor(ID2D1SolidColorBrush *iface, const D2D1_COLOR_F *color)
 {
-    FIXME("iface %p, color %p stub!\n", iface, color);
+    struct d2d_brush *brush = impl_from_ID2D1SolidColorBrush(iface);
+
+    TRACE("iface %p, color %p.\n", iface, color);
+
+    brush->u.solid.color = *color;
 }
 
 static D2D1_COLOR_F * STDMETHODCALLTYPE d2d_solid_color_brush_GetColor(ID2D1SolidColorBrush *iface, D2D1_COLOR_F *color)
 {
-    static const D2D1_COLOR_F black = {0.0f, 0.0f, 0.0f, 1.0f};
+    struct d2d_brush *brush = impl_from_ID2D1SolidColorBrush(iface);
 
-    FIXME("iface %p, color %p stub!\n", iface, color);
+    TRACE("iface %p, color %p.\n", iface, color);
 
-    *color = black;
+    *color = brush->u.solid.color;
     return color;
 }
 
@@ -256,7 +284,9 @@ void d2d_solid_color_brush_init(struct d2d_brush *brush, ID2D1RenderTarget *rend
 {
     FIXME("Ignoring brush properties.\n");
 
-    d2d_brush_init(brush, render_target, desc, (ID2D1BrushVtbl *)&d2d_solid_color_brush_vtbl);
+    d2d_brush_init(brush, render_target, D2D_BRUSH_TYPE_SOLID, desc,
+            (ID2D1BrushVtbl *)&d2d_solid_color_brush_vtbl);
+    brush->u.solid.color = *color;
 }
 
 static inline struct d2d_brush *impl_from_ID2D1LinearGradientBrush(ID2D1LinearGradientBrush *iface)
@@ -412,5 +442,15 @@ void d2d_linear_gradient_brush_init(struct d2d_brush *brush, ID2D1RenderTarget *
 {
     FIXME("Ignoring brush properties.\n");
 
-    d2d_brush_init(brush, render_target, brush_desc, (ID2D1BrushVtbl *)&d2d_solid_color_brush_vtbl);
+    d2d_brush_init(brush, render_target, D2D_BRUSH_TYPE_LINEAR, brush_desc,
+            (ID2D1BrushVtbl *)&d2d_linear_gradient_brush_vtbl);
+}
+
+struct d2d_brush *unsafe_impl_from_ID2D1Brush(ID2D1Brush *iface)
+{
+    if (!iface)
+        return NULL;
+    assert(iface->lpVtbl == (const ID2D1BrushVtbl *)&d2d_solid_color_brush_vtbl
+            || iface->lpVtbl == (const ID2D1BrushVtbl *)&d2d_linear_gradient_brush_vtbl);
+    return CONTAINING_RECORD(iface, struct d2d_brush, ID2D1Brush_iface);
 }

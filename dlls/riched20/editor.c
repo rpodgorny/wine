@@ -1194,7 +1194,7 @@ static BOOL ME_RTFInsertOleObject(RTF_Info *info, HENHMETAFILE hemf, HBITMAP hbm
 
   if (!info->lpRichEditOle)
   {
-    CreateIRichEditOle(info->editor, (VOID**)&info->lpRichEditOle);
+    CreateIRichEditOle(NULL, info->editor, (VOID**)&info->lpRichEditOle);
   }
 
   if (OleCreateDefaultHandler(&CLSID_NULL, NULL, &IID_IOleObject, (void**)&lpObject) == S_OK &&
@@ -2118,7 +2118,7 @@ static BOOL ME_Copy(ME_TextEditor *editor, const ME_Cursor *start, int nChars)
     hr = OleSetClipboard(dataObj);
     IDataObject_Release(dataObj);
   }
-  return SUCCEEDED(hr) != 0;
+  return SUCCEEDED(hr);
 }
 
 /* helper to send a msg filter notification */
@@ -2863,7 +2863,7 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
   return ed;
 }
 
-static void ME_DestroyEditor(ME_TextEditor *editor)
+void ME_DestroyEditor(ME_TextEditor *editor)
 {
   ME_DisplayItem *pFirst = editor->pBuffer->pFirst;
   ME_DisplayItem *p = pFirst, *pNext = NULL;
@@ -2889,7 +2889,7 @@ static void ME_DestroyEditor(ME_TextEditor *editor)
   ITextHost_Release(editor->texthost);
   if (editor->reOle)
   {
-    IRichEditOle_Release(editor->reOle);
+    DestroyIRichEditOle(editor->reOle);
     editor->reOle = NULL;
   }
   OleUninitialize();
@@ -4474,7 +4474,7 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   case EM_GETOLEINTERFACE:
   {
     if (!editor->reOle)
-      if (!CreateIRichEditOle(editor, (LPVOID *)&editor->reOle))
+      if (!CreateIRichEditOle(NULL, editor, (LPVOID *)&editor->reOle))
         return 0;
     *(LPVOID *)lParam = editor->reOle;
     IRichEditOle_AddRef(editor->reOle);

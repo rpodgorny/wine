@@ -2438,9 +2438,9 @@ static UINT ACTION_CostFinalize(MSIPACKAGE *package)
     return MSI_SetFeatureStates(package);
 }
 
-static BYTE *parse_value( MSIPACKAGE *package, const WCHAR *value, DWORD *type, DWORD *size )
+static BYTE *parse_value( MSIPACKAGE *package, const WCHAR *value, DWORD len, DWORD *type, DWORD *size )
 {
-    BYTE *data = NULL;
+    BYTE *data;
 
     if (!value)
     {
@@ -2529,19 +2529,18 @@ static BYTE *parse_value( MSIPACKAGE *package, const WCHAR *value, DWORD *type, 
     else
     {
         const WCHAR *ptr = value;
-        DWORD len;
 
         *type = REG_SZ;
         if (value[0] == '#')
         {
-            ptr++;
+            ptr++; len--;
             if (value[1] == '%')
             {
-                ptr++;
+                ptr++; len--;
                 *type = REG_EXPAND_SZ;
             }
         }
-        len = deformat_string( package, ptr, (WCHAR **)&data );
+        data = (BYTE *)msi_strdupW( ptr, len );
         if (len > strlenW( (const WCHAR *)data )) *type = REG_MULTI_SZ;
         *size = (len + 1) * sizeof(WCHAR);
     }
@@ -2872,14 +2871,11 @@ static UINT ITERATE_WriteRegistryValues(MSIRECORD *row, LPVOID param)
         msi_free(keypath);
         return ERROR_FUNCTION_FAILED;
     }
-    str = msi_record_get_string( row, 5, &len );
-    if (str && len > strlenW( str ))
-    {
-        type = REG_MULTI_SZ;
-        new_size = (len + 1) * sizeof(WCHAR);
-        new_value = (BYTE *)msi_strdupW( str, len );
-    }
-    else new_value = parse_value( package, str, &type, &new_size );
+    str = msi_record_get_string( row, 5, NULL );
+    len = deformat_string( package, str, &deformated );
+    new_value = parse_value( package, deformated, len, &type, &new_size );
+
+    msi_free( deformated );
     deformat_string(package, name, &deformated);
 
     if (!is_special_entry( name ))
@@ -5316,7 +5312,7 @@ static UINT ACTION_InstallFinalize(MSIPACKAGE *package)
     WCHAR *remove;
 
     /* first do the same as an InstallExecute */
-    rc = ACTION_InstallExecute(package);
+    rc = execute_script(package, SCRIPT_INSTALL);
     if (rc != ERROR_SUCCESS)
         return rc;
 
@@ -7817,10 +7813,7 @@ UINT MSI_InstallPackage( MSIPACKAGE *package, LPCWSTR szPackagePath,
         package->full_reinstall = 1;
     }
 
-    /* properties may have been added by a transform */
-    msi_clone_properties( package );
     msi_set_original_database_property( package->db, szPackagePath );
-
     msi_parse_command_line( package, szCommandLine, FALSE );
     msi_adjust_privilege_properties( package );
     msi_set_context( package );

@@ -2148,6 +2148,17 @@ static void _test_range_isequal(unsigned line, IHTMLTxtRange *range1, IHTMLTxtRa
     }
 }
 
+#define test_range_paste_html(a,b) _test_range_paste_html(__LINE__,a,b)
+static void _test_range_paste_html(unsigned line, IHTMLTxtRange *range, const char *html)
+{
+    BSTR str = a2bstr(html);
+    HRESULT hres;
+
+    hres = IHTMLTxtRange_pasteHTML(range, str);
+     ok_(__FILE__,line)(hres == S_OK, "pasteHTML failed: %08x\n", hres);
+     SysFreeString(str);
+}
+
 #define test_range_parent(r,t) _test_range_parent(__LINE__,r,t)
 static void _test_range_parent(unsigned line, IHTMLTxtRange *range, elem_type_t type)
 {
@@ -2693,6 +2704,39 @@ static void _test_select_set_disabled(unsigned line, IHTMLSelectElement *select,
     ok_(__FILE__,line) (hres == S_OK, "get_disabled failed: %08x\n", hres);
 
     _test_select_get_disabled(line, select, b);
+}
+
+#define test_elem_dir(u,n) _test_elem_dir(__LINE__,u,n)
+static void _test_elem_dir(unsigned line, IUnknown *unk, const char *exdir)
+{
+    IHTMLElement2 *elem = _get_elem2_iface(line, unk);
+    BSTR dir;
+    HRESULT hres;
+
+    hres = IHTMLElement2_get_dir(elem, &dir);
+    IHTMLElement2_Release(elem);
+    ok_(__FILE__, line) (hres == S_OK, "get_dir failed: %08x\n", hres);
+    if(exdir)
+        ok_(__FILE__, line) (!strcmp_wa(dir, exdir), "got dir: %s, expected %s\n", wine_dbgstr_w(dir), exdir);
+    else
+        ok_(__FILE__, line) (!dir, "got dir: %s, expected NULL\n", wine_dbgstr_w(dir));
+
+    SysFreeString(dir);
+}
+
+#define set_elem_dir(u,n) _set_elem_dir(__LINE__,u,n)
+static void _set_elem_dir(unsigned line, IUnknown *unk, const char *dira)
+{
+    IHTMLElement2 *elem = _get_elem2_iface(line, unk);
+    BSTR dir = a2bstr(dira);
+    HRESULT hres;
+
+    hres = IHTMLElement2_put_dir(elem, dir);
+    IHTMLElement2_Release(elem);
+    ok_(__FILE__, line) (hres == S_OK, "put_dir failed: %08x\n", hres);
+    SysFreeString(dir);
+
+    _test_elem_dir(line, unk, dira);
 }
 
 #define elem_get_scroll_height(u) _elem_get_scroll_height(__LINE__,u)
@@ -4823,9 +4867,12 @@ static void test_txtrange(IHTMLDocument2 *doc)
     IHTMLTxtRange *body_range, *range, *range2;
     IHTMLSelectionObject *selection;
     IDispatch *disp_range;
+    IHTMLElement *body;
     HRESULT hres;
 
     body_range = test_create_body_range(doc);
+
+    test_disp((IUnknown*)body_range, &IID_IHTMLTxtRange, "[object]");
 
     test_range_text(body_range, "test abc 123\r\nit's text");
 
@@ -4973,6 +5020,8 @@ static void test_txtrange(IHTMLDocument2 *doc)
     hres = IHTMLDocument2_get_selection(doc, &selection);
     ok(hres == S_OK, "IHTMLDocument2_get_selection failed: %08x\n", hres);
 
+    test_disp((IUnknown*)selection, &IID_IHTMLSelectionObject, "[object]");
+
     hres = IHTMLSelectionObject_createRange(selection, &disp_range);
     ok(hres == S_OK, "IHTMLSelectionObject_createRange failed: %08x\n", hres);
     IHTMLSelectionObject_Release(selection);
@@ -5003,6 +5052,32 @@ static void test_txtrange(IHTMLDocument2 *doc)
     test_range_move(range, wordW, 1, 1);
     test_range_moveend(range, characterW, 2, 2);
     test_range_text(range, "ab");
+
+    body = doc_get_body(doc);
+
+    hres = IHTMLTxtRange_moveToElementText(range, body);
+    ok(hres == S_OK, "moveToElementText failed: %08x\n", hres);
+
+    test_range_text(range, "abc xyz abc 123\r\nit's text");
+    test_range_parent(range, ET_BODY);
+
+    test_range_move(range, wordW, 1, 1);
+    test_range_moveend(range, characterW, 12, 12);
+    test_range_text(range, "xyz abc 123");
+
+    test_range_collapse(range, VARIANT_TRUE);
+    test_range_paste_html(range, "<br>paste<br>");
+    test_range_text(range, NULL);
+
+    test_range_moveend(range, characterW, 3, 3);
+    test_range_text(range, "xyz");
+
+    hres = IHTMLTxtRange_moveToElementText(range, body);
+    ok(hres == S_OK, "moveToElementText failed: %08x\n", hres);
+
+    test_range_text(range, "abc \r\npaste\r\nxyz abc 123\r\nit's text");
+
+    IHTMLElement_Release(body);
 
     IHTMLTxtRange_Release(range);
 }
@@ -5624,6 +5699,9 @@ static void test_default_body(IHTMLBodyElement *body)
     l = elem_get_scroll_top((IUnknown*)body);
     ok(!l, "scrollTop = %d\n", l);
     elem_get_scroll_left((IUnknown*)body);
+
+    test_elem_dir((IUnknown*)body, NULL);
+    set_elem_dir((IUnknown*)body, "ltr");
 
     /* get_text tests */
     hres = IHTMLBodyElement_get_text(body, &v);
@@ -6335,6 +6413,23 @@ static void _test_table_cell_spacing(unsigned line, IHTMLTable *table, const cha
     VariantClear(&v);
 }
 
+#define test_table_cell_padding(a,b) _test_table_cell_padding(__LINE__,a,b)
+static void _test_table_cell_padding(unsigned line, IHTMLTable *table, const char *exstr)
+{
+    VARIANT v;
+    HRESULT hres;
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLTable_get_cellPadding(table, &v);
+    ok_(__FILE__,line)(hres == S_OK, "get_cellPadding failed: %08x\n", hres);
+    ok_(__FILE__,line)(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    if(exstr)
+        ok_(__FILE__,line)(!strcmp_wa(V_BSTR(&v), exstr), "cellPadding = %s, expected %s\n", wine_dbgstr_w(V_BSTR(&v)), exstr);
+    else
+        ok_(__FILE__,line)(!V_BSTR(&v), "cellPadding = %s, expected NULL\n", wine_dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
+}
+
 static void test_table_modify(IHTMLTable *table)
 {
     IDispatch *disp;
@@ -6437,6 +6532,27 @@ static void test_table_elem(IHTMLElement *elem)
     test_table_cell_spacing(table, "11");
     VariantClear(&v);
 
+    test_table_cell_padding(table, NULL);
+
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = 10;
+    hres = IHTMLTable_put_cellPadding(table, v);
+    ok(hres == S_OK, "put_cellPadding = %08x\n", hres);
+    test_table_cell_padding(table, "10");
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = a2bstr("11");
+    hres = IHTMLTable_put_cellPadding(table, v);
+    ok(hres == S_OK, "put_cellPadding = %08x\n", hres);
+    test_table_cell_padding(table, "11");
+    VariantClear(&v);
+
+    V_VT(&v) = VT_R8;
+    V_R8(&v) = 5;
+    hres = IHTMLTable_put_cellPadding(table, v);
+    ok(hres == S_OK, "put_cellPadding = %08x\n", hres);
+    test_table_cell_padding(table, "5");
+
     bstr = a2bstr("left");
     hres = IHTMLTable_put_align(table, bstr);
     ok(hres == S_OK, "set_align failed: %08x\n", hres);
@@ -6530,7 +6646,6 @@ static void test_table_elem(IHTMLElement *elem)
     ok(hres == S_OK, "get_width = %08x\n", hres);
     ok(!strcmp_wa(V_BSTR(&v), "11"), "Expected 11, got %s\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
-
 
     bstr = a2bstr("box");
     hres = IHTMLTable_put_frame(table, bstr);

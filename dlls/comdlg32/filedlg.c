@@ -1599,9 +1599,7 @@ static LRESULT FILEDLG95_InitControls(HWND hwnd)
               /* initdir does not have to be a directory. If a file is
                * specified, the dir part is taken */
               if( PathIsDirectoryW(tmpBuf)) {
-                  if (tmpBuf[lstrlenW(tmpBuf)-1] != '\\') {
-                     lstrcatW(tmpBuf, szwSlash);
-                  }
+                  PathAddBackslashW( tmpBuf );
                   lstrcatW(tmpBuf, szwStar);
               }
               result = GetFullPathNameW(tmpBuf, MAX_PATH, tmpBuf2, &nameBit);
@@ -3270,7 +3268,6 @@ static LRESULT FILEDLG95_LOOKIN_DrawItem(LPDRAWITEMSTRUCT pDIStruct)
   int iIndentation;
   TEXTMETRICW tm;
   LPSFOLDER tmpFolder;
-  LookInInfos *liInfos = GetPropA(pDIStruct->hwndItem,LookInInfosStr);
   UINT shgfi_flags = SHGFI_PIDL | SHGFI_OPENICON | SHGFI_SYSICONINDEX | SHGFI_DISPLAYNAME;
   UINT icon_width, icon_height;
 
@@ -3293,16 +3290,8 @@ static LRESULT FILEDLG95_LOOKIN_DrawItem(LPDRAWITEMSTRUCT pDIStruct)
       shgfi_flags |= SHGFI_SMALLICON;
   }
 
-  if(pDIStruct->itemID == liInfos->uSelectedItem)
-  {
-    ilItemImage = (HIMAGELIST) SHGetFileInfoW ((LPCWSTR) tmpFolder->pidlItem,
-                                               0, &sfi, sizeof (sfi), shgfi_flags );
-  }
-  else
-  {
-    ilItemImage = (HIMAGELIST) SHGetFileInfoW ((LPCWSTR) tmpFolder->pidlItem,
-                                               0, &sfi, sizeof (sfi), shgfi_flags );
-  }
+  ilItemImage = (HIMAGELIST) SHGetFileInfoW ((LPCWSTR) tmpFolder->pidlItem,
+                                             0, &sfi, sizeof (sfi), shgfi_flags );
 
   /* Is this item selected ? */
   if(pDIStruct->itemState & ODS_SELECTED)
@@ -3320,16 +3309,10 @@ static LRESULT FILEDLG95_LOOKIN_DrawItem(LPDRAWITEMSTRUCT pDIStruct)
 
   /* Do not indent item if drawing in the edit of the combo */
   if(pDIStruct->itemState & ODS_COMBOBOXEDIT)
-  {
     iIndentation = 0;
-    ilItemImage = (HIMAGELIST) SHGetFileInfoW ((LPCWSTR) tmpFolder->pidlItem,
-                                               0, &sfi, sizeof (sfi), shgfi_flags );
-
-  }
   else
-  {
     iIndentation = tmpFolder->m_iIndent;
-  }
+
   /* Draw text and icon */
 
   /* Initialise the icon display area */

@@ -128,12 +128,19 @@ int    __cdecl _vsnprintf_s(char*,size_t,size_t,const char*,__ms_va_list);
 int    __cdecl _vsprintf_p_l(char*,size_t,const char*,_locale_t,__ms_va_list);
 
 size_t __cdecl _fread_nolock(void*,size_t,size_t,FILE*);
+size_t __cdecl _fread_nolock_s(void*,size_t,size_t,size_t,FILE*);
 size_t __cdecl _fwrite_nolock(const void*,size_t,size_t,FILE*);
 int    __cdecl _fclose_nolock(FILE*);
+int    __cdecl _fflush_nolock(FILE*);
+int    __cdecl _fgetc_nolock(FILE*);
+int    __cdecl _fputc_nolock(int,FILE*);
 int    __cdecl _fseek_nolock(FILE*,__msvcrt_long,int);
 int    __cdecl _fseeki64_nolock(FILE*,__int64,int);
 __msvcrt_long __cdecl _ftell_nolock(FILE*);
 __int64 __cdecl _ftelli64_nolock(FILE*);
+int    __cdecl _getc_nolock(FILE*);
+int    __cdecl _putc_nolock(int,FILE*);
+int    __cdecl _ungetc_nolock(int,FILE*);
 
 void   __cdecl clearerr(FILE*);
 int    __cdecl fclose(FILE*);
@@ -150,6 +157,7 @@ int    __cdecl fprintf_s(FILE*,const char*,...);
 int    __cdecl fputc(int,FILE*);
 int    __cdecl fputs(const char*,FILE*);
 size_t __cdecl fread(void*,size_t,size_t,FILE*);
+size_t __cdecl fread_s(void*,size_t,size_t,size_t,FILE*);
 FILE*  __cdecl freopen(const char*,const char*,FILE*);
 int    __cdecl fscanf(FILE*,const char*,...);
 int    __cdecl fscanf_s(FILE*,const char*,...);
@@ -194,13 +202,18 @@ unsigned int __cdecl _set_output_format(void);
 
 #ifndef _WSTDIO_DEFINED
 #define _WSTDIO_DEFINED
+wint_t   __cdecl _fgetwc_nolock(FILE*);
 wint_t   __cdecl _fgetwchar(void);
+wint_t   __cdecl _fputwc_nolock(wint_t,FILE*);
 wint_t   __cdecl _fputwchar(wint_t);
+wint_t   __cdecl _getwc_nolock(FILE*);
 wchar_t* __cdecl _getws(wchar_t*);
+wint_t   __cdecl _putwc_nolock(wint_t,FILE*);
 int      __cdecl _putws(const wchar_t*);
 int      __cdecl _snwprintf(wchar_t*,size_t,const wchar_t*,...);
 int      __cdecl _snwprintf_s(wchar_t*,size_t,size_t,const wchar_t*,...);
 int      __cdecl _scwprintf(const wchar_t*,...);
+wint_t   __cdecl _ungetwc_nolock(wint_t,FILE*);
 int      __cdecl _vscwprintf(const wchar_t*,__ms_va_list);
 int      __cdecl _vscwprintf_p_l(const wchar_t*,_locale_t,__ms_va_list);
 int      __cdecl _vsnwprintf(wchar_t*,size_t,const wchar_t*,__ms_va_list);
